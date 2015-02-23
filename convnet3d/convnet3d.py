@@ -8,7 +8,7 @@ RectLayer: rectification (absolute value)
 
 """
 
-
+import theano
 from theano.tensor.nnet.conv3d2d import conv3d
 from maxpool3d import max_pool_3d
 from activations import relu, softplus
@@ -16,8 +16,8 @@ from activations import relu, softplus
 from numpy import sqrt, prod, ones, floor, repeat, pi, exp, zeros, sum
 from numpy.random import RandomState
 
-from theano.tensor.nnet import conv2d
 from theano import shared, config, _asarray
+import theano.tensor.slinalg
 import theano.tensor as T
 floatX = config.floatX
 
@@ -92,117 +92,6 @@ class ConvLayer(object):
 
         self.output = activation(out)
 
-
-class NormLayer(object):
-    """ Normalization layer """
-
-    def __init__(self, input, method="lcn", **kwargs):
-        """
-        method: "lcn", "gcn", "mean"
-
-        LCN: local contrast normalization
-            kwargs: 
-                kernel_size=9, threshold=1e-4, use_divisor=True
-
-        GCN: global contrast normalization
-            kwargs:
-                scale=1., subtract_mean=True, use_std=False, sqrt_bias=0., 
-                min_divisor=1e-8
-
-        MEAN: local mean subtraction
-            kwargs:
-                kernel_size=5
-        """
-
-        input_shape = input.shape
-
-        # make 4D tensor out of 5D tensor -> (n_images, 1, height, width)
-        input_shape_4D = (input_shape[0]*input_shape[1]*input_shape[2], 1,
-                            input_shape[3], input_shape[4])
-        input_4D = input.reshape(input_shape_4D, ndim=4)
-        if method=="lcn":
-            out = self.lecun_lcn(input_4D, **kwargs)
-        elif method=="gcn":
-            out = self.global_contrast_normalize(input_4D,**kwargs)
-        elif method=="mean":
-            out = self.local_mean_subtraction(input_4D, **kwargs)
-        else:
-            raise NotImplementedError()
-
-        self.output = out.reshape(input_shape)
-
-    def lecun_lcn(self, X, kernel_size=7, threshold = 1e-4, use_divisor=False):
-        """
-        Yann LeCun's local contrast normalization
-        Orginal code in Theano by: Guillaume Desjardins
-        """
-
-        filter_shape = (1, 1, kernel_size, kernel_size)
-        filters = gaussian_filter(kernel_size).reshape(filter_shape)
-        filters = shared(_asarray(filters, dtype=floatX), borrow=True)
-
-        convout = conv2d(X, filters=filters, filter_shape=filter_shape, 
-                            border_mode='full')
-
-        # For each pixel, remove mean of kernel_sizexkernel_size neighborhood
-        mid = int(floor(kernel_size/2.))
-        new_X = X - convout[:,:,mid:-mid,mid:-mid]
-
-        if use_divisor:
-            # Scale down norm of kernel_sizexkernel_size patch
-            sum_sqr_XX = conv2d(T.sqr(T.abs_(X)), filters=filters, 
-                                filter_shape=filter_shape, border_mode='full')
-
-            denom = T.sqrt(sum_sqr_XX[:,:,mid:-mid,mid:-mid])
-            per_img_mean = denom.mean(axis=[2,3])
-            divisor = T.largest(per_img_mean.dimshuffle(0,1,'x','x'), denom)
-            divisor = T.maximum(divisor, threshold)
-
-            new_X /= divisor
-
-        return new_X#T.cast(new_X, floatX)
-
-    def local_mean_subtraction(self, X, kernel_size=5):
-         
-        filter_shape = (1, 1, kernel_size, kernel_size)
-        filters = mean_filter(kernel_size).reshape(filter_shape)
-        filters = shared(_asarray(filters, dtype=floatX), borrow=True)
-
-        mean = conv2d(X, filters=filters, filter_shape=filter_shape, 
-                        border_mode='full')
-        mid = int(floor(kernel_size/2.))
-
-        return X - mean[:,:,mid:-mid,mid:-mid]
-
-    def global_contrast_normalize(self, X, scale=1., subtract_mean=True, 
-        use_std=False, sqrt_bias=0., min_divisor=1e-8):
-
-        ndim = X.ndim
-        if not ndim in [3,4]: raise NotImplementedError("X.dim>4 or X.ndim<3")
-
-        scale = float(scale)
-        mean = X.mean(axis=ndim-1)
-        new_X = X.copy()
-
-        if subtract_mean:
-            if ndim==3:
-                new_X = X - mean[:,:,None]
-            else: new_X = X - mean[:,:,:,None]
-
-        if use_std:
-            normalizers = T.sqrt(sqrt_bias + X.var(axis=ndim-1)) / scale
-        else:
-            normalizers = T.sqrt(sqrt_bias + (new_X ** 2).sum(axis=ndim-1)) / scale
-
-        # Don't normalize by anything too small.
-        T.set_subtensor(normalizers[(normalizers < min_divisor).nonzero()], 1.)
-
-        if ndim==3: new_X /= normalizers[:,:,None]
-        else: new_X /= normalizers[:,:,:,None]
-
-        return new_X
-
-
 class PoolLayer(object):
     """ Subsampling and pooling layer """
 
@@ -220,14 +109,154 @@ class PoolLayer(object):
             raise NotImplementedError()
 
         self.output = out
+        
+        
+def flat_join(*args):
+    # Reduce all inputs to vector 
+    #(https://groups.google.com/forum/#!msg/theano-users/A-RcItll8eA/z8eZyrTwX9wJ)
+    join_args = []
+    for i,arg in enumerate(args):
+        if arg.type.ndim: # it is not a scalar
+            join_args.append(arg.flatten())
+        else:
+            join_args.append( T.shape_padleft(arg))
+            # join them into a vector
+    return T.join(0, *join_args)
+        
 
+def optical_flow_regularizer(kernel,kernel_shape,
+                             rng=RandomState(1234),bgr=True,gamma=0.25):
+    """ Creates theano expressions to evaluate regularization and its gradient
+    
+    Args:
+        kernel - theano.tensor (5D)
+        
+    Returns:
+        A tuple of theano expressions which compute the regularization penalty
+        and its gradient.
+        
+        See technical report by Kevin Chavez for details.
+    """
+    # Create holders for optimal optical flow vectors
+    N, C, TT, HH, WW = kernel_shape
+    Vx = theano.shared(rng.randn(N,TT-1,HH-1,WW-1).astype(theano.config.floatX),
+                       borrow=True)
+    Vy = theano.shared(rng.randn(N,TT-1,HH-1,WW-1).astype(theano.config.floatX),
+                       borrow=True)
+    
+    # Formulate optical flow cost
+    # If bgr, convert to grayscale (first layer of network)
+    # Note: kernel is a 5D tensor, W is a 4D tensor (n_filt,frame,height,width)
+    if bgr:
+        W = 0.2989*kernel[:,2] + 0.5870*kernel[:,1] + 0.1140*kernel[:,0]
+    else:
+        # Otherwise take average across channels (untested)
+        W = T.mean(kernel,axis=1)
+        
+    #dX = T.extra_ops.diff(W,n=1,axis=-1)
+    dX = W[:,:,:,1:] - W[:,:,:,0:WW-1]
+    #dY = T.extra_ops.diff(W,n=1,axis=-2)
+    dY = W[:,:,1:,:] - W[:,:,0:HH-1,:]
+    #dT = T.extra_ops.diff(W,n=1,axis=-3)
+    dT = W[:,1:,:,:] - W[:,0:TT-1,:,:]    
+    
+    # Only use 'valid' region where we can compute dX, dY and dT to compute
+    # brightness constancy violation
+    bc_diff = dX[:,:-1,:-1,:]*Vx + dY[:,:-1,:,:-1]*Vy + dT[:,:,:-1,:-1]
+    bc_penalty = T.sum(bc_diff * bc_diff)
+    
+    # Smoothness constraint
+    Vxdx = Vx[:,:,:,1:] - Vx[:,:,:,0:-1]
+    Vxdy = Vx[:,:,1:,:] - Vx[:,:,0:-1,:]
+    Vxdt = Vx[:,1:,:,:] - Vx[:,0:-1,:,:]
 
-class RectLayer(object):
-    """  Rectification layer """
+    Vydx = Vy[:,:,:,1:] - Vy[:,:,:,0:-1]
+    Vydy = Vy[:,:,1:,:] - Vy[:,:,0:-1,:]
+    Vydt = Vy[:,1:,:,:] - Vy[:,0:-1,:,:]
+    
+    smoothness_penalty =  T.sum(Vxdx*Vxdx) + \
+                         T.sum(Vxdy*Vxdy) + \
+                         T.sum(Vxdt*Vxdt) + \
+                         T.sum(Vydx*Vydx) + \
+                         T.sum(Vydy*Vydy) + \
+                         T.sum(Vydt*Vydt)
 
-    def __init__(self, input):
-        self.output = T.abs_(input)
+    cost = 0.5*(bc_penalty + gamma*smoothness_penalty)
+    
+    # Gradients for Vx and Vy, W constant
+    gVx = T.grad(cost,Vx,consider_constant=[W])
+    gVy = T.grad(cost,Vy,consider_constant=[W])
+    
+    # Hessian for Vx, Vy. Again W is constant.
+    # Note: We can save a *substantial* amount of time by expressing the 
+    # Hessian in its sparse format. It has O(n) non-zero terms, or more
+    # precisely less than 9n non-zero terms. It's also symmetric, so only 5n
+    # of those are unique. (n is the number of elements in [Vx; Vy])
+    g_all = flat_join(gVx,gVy)
+    H,updates = theano.scan( 
+                    lambda i,g_all,Vx,Vy: flat_join(T.grad(g_all[i],Vx),
+                                                    T.grad(g_all[i], Vy)), 
+                    sequences = T.arange(g_all.shape[0]), 
+                    non_sequences = [g_all, Vx, Vy])
+    
+    # Sparse solve would be fantastic. In the mean-time Cholesky factorization
+    # reduces running time by a factor of about 6
+    L = T.slinalg.cholesky(H)
+    lower_solve = T.slinalg.Solve(A_structure="lower_triangular")
+    upper_solve = T.slinalg.Solve(A_structure="upper_triangular")
+    b = lower_solve(L,g_all)
+    # Can solve for optimum in a single newton step
+    x_star = flat_join(Vx,Vy) - upper_solve(T.transpose(L),b)
+                                    
+    Vx_star = x_star[0:Vx.size].reshape(Vx.shape)
+    Vy_star = x_star[Vx.size:].reshape(Vy.shape)
+    
+    # Now we can compute the minimum optical flow cost, which is the
+    # regularization loss
+        
+    # Brightness constancy violation
+    bc_diff_star = dX[:,:-1,:-1,:]*Vx_star + dY[:,:-1,:,:-1]*Vy_star + dT[:,:,:-1,:-1]
+    opt_bc_penalty = T.sum(bc_diff_star * bc_diff_star)
+    
+    # Smoothness constraint
+    Vxdx_star = Vx_star[:,:,:,1:] - Vx_star[:,:,:,0:-1]
+    Vxdy_star = Vx_star[:,:,1:,:] - Vx_star[:,:,0:-1,:]
+    Vxdt_star = Vx_star[:,1:,:,:] - Vx_star[:,0:-1,:,:]
 
+    Vydx_star = Vy_star[:,:,:,1:] - Vy_star[:,:,:,0:-1]
+    Vydy_star = Vy_star[:,:,1:,:] - Vy_star[:,:,0:-1,:]
+    Vydt_star = Vy_star[:,1:,:,:] - Vy_star[:,0:-1,:,:]
+    
+    opt_smoothness_penalty = T.sum(Vxdx_star*Vxdx_star) + \
+                             T.sum(Vxdy_star*Vxdy_star) + \
+                             T.sum(Vxdt_star*Vxdt_star) + \
+                             T.sum(Vydx_star*Vydx_star) + \
+                             T.sum(Vydy_star*Vydy_star) + \
+                             T.sum(Vydt_star*Vydt_star)
+    
+    reg_loss = 0.5*(opt_bc_penalty + gamma*opt_smoothness_penalty)
+        
+    # Gradient with respect to kernel, consider Vx, Vy constant.
+    # IMPORTANT: The regularization term is the MINIMUM achievable loss given
+    # a particular kernel. However, if Vx and Vy currently store the optimal
+    # optical flow vector field, the gradient of the minimum loss with respect
+    # to the kernel is identical to the gradient of the loss with respect to 
+    # the kernel, EVALUATED at (Vx, Vy). In other words, this gradient is only
+    # valid as long as Vx and Vy are kept updated.
+    g_kernel = T.grad(reg_loss,kernel,consider_constant=[Vx_star,Vy_star])
+    
+    # Alternatively, it's possible Theano's expression graph can efficiently
+    # compute the gradient of reg_loss with respect to the kernel. But I 
+    # highly doubt it
+    #g_kernel2 = T.grad(reg_loss,kernel,consider_constant=[Vx_star,Vy_star])
+    updates = [(Vx, Vx_star), (Vy, Vy_star)]
+    return reg_loss, updates, g_kernel
+    
+def l2_regularizer(kernel):
+    """ Creates theano expressions to evaluate regularization and its gradient.
+    """
+    return 0.5*T.sum(kernel*kernel), kernel
+    
 
 def gaussian_filter(kernel_shape):
 
