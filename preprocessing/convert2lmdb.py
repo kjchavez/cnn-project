@@ -16,6 +16,7 @@ from src.dataio.datum import Datum4D
 
 APPROXIMATE_MEAN = 127
 MAX_ATTEMPTS = 3
+KEY_BATCH_SIZE = 10000
 
 def read_clip(capture, video_filename, num_frames, 
               height=-1, width=-1, start_frame=0, mean_subtract=True):
@@ -83,7 +84,7 @@ def write_to_lmdb(env, keys, data):
         
 def convert_list(list_file,database_name,root_directory,
                  num_frames=16,width=-1,height=-1,start_frame=0,batch_size=10,
-                 map_size=100e6):
+                 map_size=100e6,randomize=False):
 
     capture = cv2.VideoCapture()
     env = lmdb.open(database_name,map_size=map_size,writemap=True)
@@ -91,6 +92,10 @@ def convert_list(list_file,database_name,root_directory,
     keys = []
     done = False
     batch_num = 1
+    key_list = np.arange(KEY_BATCH_SIZE)
+    if randomize:
+        np.random.shuffle(key_list)
+        
     curr_key = 0
     with open(list_file) as video_list:
         while not done:
@@ -110,7 +115,14 @@ def convert_list(list_file,database_name,root_directory,
                                  width=width,start_frame=start_frame)
                 datum = create_datum(clip,label)
                 data.append(datum)
-                keys.append("%08d_%s" % (curr_key,filename))
+
+                if curr_key >= key_list.size:
+                    key_list = np.arange(curr_key,curr_key+KEY_BATCH_SIZE)
+                    if randomize:
+                        np.random.shuffle(key_list)
+                    curr_key = 0
+                    
+                keys.append("%08d_%s" % (key_list[curr_key],filename))
                 curr_key += 1
 
             for n in range(MAX_ATTEMPTS):
@@ -143,12 +155,15 @@ def main():
                              " so make sure you have space for it).")
     parser.add_argument("--mapsize","-m",type=int,default=100e6,
                         help="Maximum size of lmdb database")
+    parser.add_argument("--randomize",'-r',action="store_true",
+                        default=False)
 
     args = parser.parse_args()
     
     convert_list(args.input_file,args.database_name,args.root,
                  num_frames=args.length,width=args.width,height=args.height,
-                 start_frame=0,batch_size=args.batchsize,map_size=args.mapsize)
+                 start_frame=0,batch_size=args.batchsize,map_size=args.mapsize,
+                 randomize=args.randomize)
 
 if __name__ == "__main__":
     main()
