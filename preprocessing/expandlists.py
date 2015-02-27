@@ -12,12 +12,12 @@ import argparse
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--list','-l',
-                        default="../../data/ucfTrainTestlist/trainlist01.txt")
-    parser.add_argument('--frames-dir','-d',dest="frames_dir",
-                        default="../../data/frames")
+    parser.add_argument('list',
+                        help="List of videos and labels")
+    parser.add_argument('dir',
+                        help="Directory containing frames for all videos")
     parser.add_argument('--output-dir','-o',dest="output_dir",
-                        default="../../data/framesTrainTestlist")
+                        default="lists")
 
 
     args = parser.parse_args()
@@ -28,12 +28,12 @@ def main():
                                          args.list.split("/")[-1]),'w')
     
     with open(args.list) as fp:
-        os.chdir(args.frames_dir)
+        os.chdir(args.dir)
         for line in fp:
             video, label = line.split()
             video = video.split('.')[0]
     
-            for filename in glob.glob(os.path.join(video,"*.jpg")):
+            for filename in sorted(glob.glob(os.path.join(video,"*.jpg"))):
                 print >> output_list_file, filename, label
                 
     output_list_file.close()
