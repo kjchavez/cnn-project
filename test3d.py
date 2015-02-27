@@ -6,80 +6,70 @@ Created on Sat Feb 21 16:29:21 2015
 @author: kevin
 """
 import time
-import lmdb
-from convnet3d import *
 import numpy as np
 import theano
 import theano.tensor as T
 
+from src.convnet3d import *
+from src.dataio.fetcher import DataFetcher
+
 dtensor5 = T.TensorType('float64', (False,)*5)
-
-class DataFetcher(object):
-    def __init__(self,database_name):
-        self.db_name = database_name
-        self.env = lmdb.open(database_name)
-        
-    def load_data(self,batch_size,video_shape,out):
-        """Fetches a set of videos from an LMDB database.
-        
-        Args:
-            batch_size - number of videos to load into memory
-            video_shape - 3 tuple (frames, height, width) for videos
-            out - storage container of shape... 
-                    (num videos, frames, channels, height,width)
-        """
-        TT, HH, WW = video_shape
-        with self.env.begin() as txn:
-            cursor = txn.cursor()
-            it = iter(cursor)
-            for n in xrange(batch_size):
-                try:
-                    out[n] = next(it)
-                except:
-                    cursor.first() # reset to beginning
-                    it = iter(cursor)
-                    print "completed epoch"
-                    out[n] = next(it)
-                
-        return out
-        
-    def __del__(self):
-        self.env.close()
-
 
 def evaluate_3d_conv():
     theano.config.exception_verbosity = "high"
+    theano.config.optimizer = 'None'
     rng = np.random.RandomState(234)
-    TT, HH, WW = 20,60,80
+    TT, HH, WW = 16,240,320
     N = 10
     num_classes = 5
-    batch_size = 10
-    num_filters = 2
+    batch_size = 1
+    num_filters = 4
     num_channels = 3
     
+    fetcher = DataFetcher("data/tinyvideodb.lmdb")
+    X, y = fetcher.load_data(10,(16,240,320))
+    X_train = theano.shared(X.astype('float64'), borrow=True)
+    y_train = theano.shared((y/101).astype('int32'), borrow=True)
+    print y_train.get_value()
     
-    X_train = theano.shared(rng.randint(0,255,size=(N,num_channels,TT,HH,WW))
-                            .astype(theano.config.floatX),borrow=True)
-    y_train = theano.shared(rng.randint(0,num_classes,size=(N,)).astype('int32'))
-    print y_train
-
     params = []
 
     x = dtensor5('x')
     y = T.ivector('y')
-
-    # Apply padding to x  
     FT, FH, FW = 5, 5, 5
+
+    ###########################################################################
+    # CONV-RELU-POOL (Layer 1)
+    ###########################################################################
     conv1 = ConvLayer(x,num_channels,num_filters,(FT,FH,FW),(TT,HH,WW),batch_size,relu,
                       layer_name="Conv1")
     params += conv1.params
+    pool1 = PoolLayer(conv1.output,(2,2,2))
 
-    pool1 = PoolLayer(conv1.output,(2,2,2))     
-                 
-    #fc2 = HiddenLayer(conv1.output,T*H*W*2,num_classes,relu)
-    out_dim = num_filters * np.prod([TT - FT +1,HH - FH + 1, WW - FW + 1])/8
-    out_dim = num_filters*TT*HH*WW/8
-    softmax = LogRegr(pool1.output.flatten(ndim=2),out_dim,num_classes,relu,rng)
+    ###########################################################################
+    # CONV-RELU-POOL (Layer 2)
+    ###########################################################################
+    conv2 = ConvLayer(pool1.output,num_filters,num_filters,
+                      (FT,FH,FW),
+                      (TT/2,HH/2,WW/2),
+                      batch_size,
+                      relu,
+                      layer_name="Conv2")
+    params += conv2.params    
+    pool2 = PoolLayer(conv2.output,(2,2,2))
+
+    ###########################################################################
+    # FULLY-CONNECTED (Layer 3)
+    ###########################################################################
+    out_dim = num_filters*TT*HH*WW/64            
+    num_hidden = 64
+    fc3 = HiddenLayer(pool2.output.flatten(ndim=2),out_dim,num_hidden,relu)
+    params += fc3.params    
+    
+    ###########################################################################
+    # SOFTMAX (Layer 4)
+    ###########################################################################
+    softmax = LogRegr(fc3.output,num_hidden,num_classes,relu,rng)
     params += softmax.params
     
     reg = 0.01
@@ -90,7 +80,7 @@ def evaluate_3d_conv():
     # the resulting gradients will be stored in a list gparams
     gparams = [T.grad(cost, param) for param in params]
 
-    learning_rate = 0.001
+    learning_rate = 0.01
     updates = [
         (param, param - learning_rate * gparam)
         for param, gparam in zip(params, gparams)
@@ -107,9 +97,9 @@ def evaluate_3d_conv():
         }
     )
     
-    for k in range(1):
+    for k in range(10):
         tic = time.time()
-        cost = train_model(k)
+        cost = train_model(k % (N/batch_size))
         toc = time.time()
         print cost, "(%0.4f seconds)" % (toc - tic)
     
