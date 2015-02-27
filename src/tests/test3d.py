@@ -5,6 +5,7 @@ Created on Sat Feb 21 16:29:21 2015
 
 @author: kevin
 """
+import sys
 import time
 import numpy as np
 import theano
@@ -13,7 +14,7 @@ import theano.tensor as T
 from src.convnet3d import *
 from src.dataio.fetcher import DataFetcher
 
-dtensor5 = T.TensorType('float64', (False,)*5)
+dtensor5 = T.TensorType('float32', (False,)*5)
 
 def evaluate_3d_conv():
     theano.config.exception_verbosity = "high"
@@ -26,10 +27,16 @@ def evaluate_3d_conv():
     num_filters = 4
     num_channels = 3
     
-    fetcher = DataFetcher("data/tinyvideodb.lmdb")
-    X, y = fetcher.load_data(10,(16,240,320))
-    X_train = theano.shared(X.astype('float64'), borrow=True)
-    y_train = theano.shared((y/101).astype('int32'), borrow=True)
+    if len(sys.argv) > 1:
+        fetcher = DataFetcher("data/tinyvideodb.lmdb")
+        X, y = fetcher.load_data(10,(16,240,320))
+        y /= 21
+    else:
+        X = np.random.randint(-127,127,size=(N,3,16,240,320)).astype(theano.config.floatX)
+        y = np.random.randint(0,num_classes,size=(N,))
+        
+    X_train = theano.shared(X.astype('float32'), borrow=True)
+    y_train = theano.shared(y.astype('int32'), borrow=True)
     print y_train.get_value()
     
     params = []
@@ -80,7 +87,7 @@ def evaluate_3d_conv():
     # the resulting gradients will be stored in a list gparams
     gparams = [T.grad(cost, param) for param in params]
 
-    learning_rate = 0.01
+    learning_rate = 1e-5
     updates = [
         (param, param - learning_rate * gparam)
         for param, gparam in zip(params, gparams)
