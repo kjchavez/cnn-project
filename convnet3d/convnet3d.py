@@ -125,7 +125,8 @@ def flat_join(*args):
         
 
 def optical_flow_regularizer(kernel,kernel_shape,
-                             rng=RandomState(1234),bgr=True,gamma=0.25):
+                             rng=RandomState(1234),bgr=True,gamma=0.16,
+                             smoothness='L2'):
     """ Creates theano expressions to evaluate regularization and its gradient
     
     Args:
@@ -139,9 +140,9 @@ def optical_flow_regularizer(kernel,kernel_shape,
     """
     # Create holders for optimal optical flow vectors
     N, C, TT, HH, WW = kernel_shape
-    Vx = theano.shared(rng.randn(N,TT-1,HH-1,WW-1).astype(theano.config.floatX),
+    Vx = theano.shared(rng.randn(N,TT,HH,WW).astype(theano.config.floatX),
                        borrow=True)
-    Vy = theano.shared(rng.randn(N,TT-1,HH-1,WW-1).astype(theano.config.floatX),
+    Vy = theano.shared(rng.randn(N,TT,HH,WW).astype(theano.config.floatX),
                        borrow=True)
     
     # Formulate optical flow cost
@@ -153,16 +154,27 @@ def optical_flow_regularizer(kernel,kernel_shape,
         # Otherwise take average across channels (untested)
         W = T.mean(kernel,axis=1)
         
+#    gx_kernel = [[1, 0, -1],
+#                 [2, 0, -2],
+#                 [1, 0, -1]]
+#                 
+#    gy_kernel = [[1, 2, 1],
+#                 [0, 0, 0],
+#                 [-1, -2, -1]]
     #dX = T.extra_ops.diff(W,n=1,axis=-1)
-    dX = W[:,:,:,1:] - W[:,:,:,0:WW-1]
+    dX = T.concatenate((W[:,:,:,1:],T.zeros((N,TT,HH,1))),axis=3) - \
+         T.concatenate((T.zeros((N,TT,HH,1)),W[:,:,:,0:WW-1]),axis=3)
+    
     #dY = T.extra_ops.diff(W,n=1,axis=-2)
-    dY = W[:,:,1:,:] - W[:,:,0:HH-1,:]
+    dY = T.concatenate((W[:,:,1:,:],T.zeros((N,TT,1,WW))),axis=2) - \
+         T.concatenate((T.zeros((N,TT,1,WW)),W[:,:,0:HH-1,:]),axis=2)
     #dT = T.extra_ops.diff(W,n=1,axis=-3)
-    dT = W[:,1:,:,:] - W[:,0:TT-1,:,:]    
+    dT = T.concatenate((W[:,1:,:,:],T.zeros((N,1,HH,WW))),axis=1) - \
+         T.concatenate((T.zeros((N,1,HH,WW)),W[:,0:TT-1,:,:]),axis=1) 
     
     # Only use 'valid' region where we can compute dX, dY and dT to compute
     # brightness constancy violation
-    bc_diff = dX[:,:-1,:-1,:]*Vx + dY[:,:-1,:,:-1]*Vy + dT[:,:,:-1,:-1]
+    bc_diff = dX*Vx + dY*Vy + dT
     bc_penalty = T.sum(bc_diff * bc_diff)
     
     # Smoothness constraint
@@ -174,12 +186,21 @@ def optical_flow_regularizer(kernel,kernel_shape,
     Vydy = Vy[:,:,1:,:] - Vy[:,:,0:-1,:]
     Vydt = Vy[:,1:,:,:] - Vy[:,0:-1,:,:]
     
-    smoothness_penalty =  T.sum(Vxdx*Vxdx) + \
-                         T.sum(Vxdy*Vxdy) + \
-                         T.sum(Vxdt*Vxdt) + \
-                         T.sum(Vydx*Vydx) + \
-                         T.sum(Vydy*Vydy) + \
-                         T.sum(Vydt*Vydt)
+    if smoothness == 'L1':
+        smoothness_penalty =  T.sum(abs(Vxdx)) + \
+                             T.sum(abs(Vxdy)) + \
+                             T.sum(abs(Vxdt)) + \
+                             T.sum(abs(Vydx)) + \
+                             T.sum(abs(Vydy)) + \
+                             T.sum(abs(Vydt))
+        
+    else:
+        smoothness_penalty =  T.sum(Vxdx*Vxdx) + \
+                             T.sum(Vxdy*Vxdy) + \
+                             T.sum(Vxdt*Vxdt) + \
+                             T.sum(Vydx*Vydx) + \
+                             T.sum(Vydy*Vydy) + \
+                             T.sum(Vydt*Vydt)
 
     cost = 0.5*(bc_penalty + gamma*smoothness_penalty)
     
@@ -215,7 +236,7 @@ def optical_flow_regularizer(kernel,kernel_shape,
     # regularization loss
         
     # Brightness constancy violation
-    bc_diff_star = dX[:,:-1,:-1,:]*Vx_star + dY[:,:-1,:,:-1]*Vy_star + dT[:,:,:-1,:-1]
+    bc_diff_star = dX*Vx_star + dY*Vy_star + dT
     opt_bc_penalty = T.sum(bc_diff_star * bc_diff_star)
     
     # Smoothness constraint
@@ -227,12 +248,20 @@ def optical_flow_regularizer(kernel,kernel_shape,
     Vydy_star = Vy_star[:,:,1:,:] - Vy_star[:,:,0:-1,:]
     Vydt_star = Vy_star[:,1:,:,:] - Vy_star[:,0:-1,:,:]
     
-    opt_smoothness_penalty = T.sum(Vxdx_star*Vxdx_star) + \
-                             T.sum(Vxdy_star*Vxdy_star) + \
-                             T.sum(Vxdt_star*Vxdt_star) + \
-                             T.sum(Vydx_star*Vydx_star) + \
-                             T.sum(Vydy_star*Vydy_star) + \
-                             T.sum(Vydt_star*Vydt_star)
+    if smoothness == 'L1':
+        opt_smoothness_penalty = T.sum(abs(Vxdx_star)) + \
+                                 T.sum(abs(Vxdy_star)) + \
+                                 T.sum(abs(Vxdt_star)) + \
+                                 T.sum(abs(Vydx_star)) + \
+                                 T.sum(abs(Vydy_star)) + \
+                                 T.sum(abs(Vydt_star))
+    else:
+        opt_smoothness_penalty = T.sum(Vxdx_star*Vxdx_star) + \
+                                 T.sum(Vxdy_star*Vxdy_star) + \
+                                 T.sum(Vxdt_star*Vxdt_star) + \
+                                 T.sum(Vydx_star*Vydx_star) + \
+                                 T.sum(Vydy_star*Vydy_star) + \
+                                 T.sum(Vydt_star*Vydt_star)
     
     reg_loss = 0.5*(opt_bc_penalty + gamma*opt_smoothness_penalty)
         
@@ -250,7 +279,7 @@ def optical_flow_regularizer(kernel,kernel_shape,
     # highly doubt it
     #g_kernel2 = T.grad(reg_loss,kernel,consider_constant=[Vx_star,Vy_star])
     updates = [(Vx, Vx_star), (Vy, Vy_star)]
-    return reg_loss, updates, g_kernel
+    return reg_loss, updates, g_kernel, Vx_star, Vy_star
     
 def l2_regularizer(kernel):
     """ Creates theano expressions to evaluate regularization and its gradient.
