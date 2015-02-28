@@ -21,12 +21,13 @@ import theano.tensor.slinalg
 import theano.tensor as T
 floatX = config.floatX
 
+dtensor5 = theano.tensor.TensorType(floatX, (False,)*5)
 
 class ConvLayer(object):
     """ Convolutional layer, Filter Bank Layer """
 
     def __init__(self, input, n_in_maps, n_out_maps, kernel_shape, video_shape, 
-        batch_size, activation, layer_name="Conv", rng=RandomState(1234), 
+        batch_size, activation,  rng, layer_name="Conv", 
         borrow=True, W=None, b=None):
 
         """

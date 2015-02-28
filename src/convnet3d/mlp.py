@@ -10,9 +10,11 @@ from numpy import zeros, sqrt, ones
 from numpy.random import RandomState
 from theano import shared, config, _asarray
 from activations import  sigmoid, relu, softplus
+import theano
 from theano.tensor.nnet import  softmax
 from theano.tensor.shared_randomstreams import RandomStreams
 import theano.tensor as T
+
 floatX = config.floatX
 
 
@@ -24,14 +26,16 @@ class LogRegr(object):
 
         # Weigth matrix W
         if W != None: self.W = shared(W, name=layer_name+"_W", borrow=borrow)
-        elif activation in (relu,softplus): 
+       # elif activation in (relu,softplus): 
+        else:
             W_val = _asarray(rng.normal(loc=0, scale=0.01, 
                 size=(n_in, n_out)), dtype=floatX)
             self.W = shared(W_val, name=layer_name+"_W", borrow=borrow)
-        else:
-            self.W = shared(zeros((n_in, n_out), dtype=floatX), 
-                name=layer_name+"_W",
-                borrow=borrow)
+
+#        else:
+#            self.W = shared(zeros((n_in, n_out), dtype=floatX), 
+#                name=layer_name+"_W",
+#                borrow=borrow)
 
         # Bias vector
         if b!=None: self.b = shared(b, name=layer_name+"_b", borrow=borrow)
@@ -63,7 +67,7 @@ class LogRegr(object):
 class HiddenLayer(object):
     """ Hidden Layer """
 
-    def __init__(self, input, n_in, n_out, activation, rng=RandomState(1234), 
+    def __init__(self, input, n_in, n_out, activation, rng, 
         layer_name="HiddenLayer", W=None, b=None, borrow=True):
 
         if W!=None: self.W = shared(value=W, borrow=borrow, name=layer_name+'_W')
@@ -82,12 +86,11 @@ class HiddenLayer(object):
             
 
         if b != None: self.b = shared(b, name=layer_name+"_b", borrow=borrow)
-        elif activation in (relu,softplus): 
-            b_val = ones((n_out,), dtype=floatX)
-            self.b = shared(value=b_val, borrow=True)
         else: 
+            print floatX
             # Initialize b with zeros
-            self.b = shared(value=zeros((n_out,), dtype=floatX), borrow=True)
+            self.b = shared(value=zeros((n_out,), dtype=config.floatX),
+                            borrow=True, name=layer_name+"_b")
 
         # Parameters of the model
         self.params = [self.W, self.b]
@@ -95,22 +98,24 @@ class HiddenLayer(object):
         self.output = activation(T.dot(input, self.W) + self.b)
 
 
-class DropoutLayer(object):
-    """ Dropout layer: https://github.com/mdenil/dropout """
+def _dropout_from_layer(rng, layer, p):
+    """p is the probablity of dropping a unit
+    """
+    srng = theano.tensor.shared_randomstreams.RandomStreams(
+            rng.randint(999999))
+    # p=1-p because 1's indicate keep and p is prob of dropping
+    mask = srng.binomial(n=1, p=1-p, size=layer.shape)
+    # The cast is important because
+    # int * float32 = float64 which pulls things off the gpu
+    output = layer * T.cast(mask, theano.config.floatX)
+    return output
 
-    def __init__(self, input, rng=RandomState(1234), p=0.5):
-        """
-        p is the probablity of dropping a unit
-        """
+class DropoutHiddenLayer(HiddenLayer):
+    def __init__(self, input, n_in, n_out,
+                 activation, dropout_rate, rng, W=None, b=None,
+                 layer_name="FC"):
+        super(DropoutHiddenLayer, self).__init__(
+                rng=rng, input=input, n_in=n_in, n_out=n_out, W=W, b=b,
+                activation=activation,layer_name=layer_name)
 
-        # for stability
-        if T.lt(p,1e-5): # p < 0.00001
-            self.output = input
-            return
-
-        srng = RandomStreams(rng.randint(999999))
-
-        # p=1-p because 1's indicate keep and p is prob of dropping
-        mask = srng.binomial(n=1, p=1-p, size=input.shape, dtype=floatX)
-
-        self.output = input * mask
+        self.output = _dropout_from_layer(rng, self.output, p=dropout_rate)
