@@ -144,11 +144,16 @@ def test():
                         net.y: y[index * batch_size:(index + 1) * batch_size]},
                     on_unused_input='warn')
     
-    return net, data_loss
+    for i in range(N/batch_size):
+        loss = data_loss(i)[0]
+        print "Batch %d, loss = %0.5f" % (i,loss)
+        
+    print "Note: These should all be around %0.5f" % (np.log(num_classes)),
+    print "but not identical!"
     
     
 if __name__ == "__main__":
-    net, loss = test()
+    test()
 
         
         
