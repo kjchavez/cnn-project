@@ -14,7 +14,7 @@ import numpy as np
 import itertools
 from src.dataio.datum import Datum4D
 
-APPROXIMATE_MEAN = 127
+APPROXIMATE_MEAN = 127.0
 MAX_ATTEMPTS = 3
 KEY_BATCH_SIZE = 10000
 
@@ -36,7 +36,7 @@ def read_clip(capture, video_filename, num_frames,
     left = (capture.get(CV_CAP_PROP_FRAME_WIDTH) - width)/2
     right = left + width
 
-    clip = np.empty((3,num_frames,height,width),dtype=np.uint8)
+    clip = np.empty((3,num_frames,height,width),dtype=np.int16)
     
     if start_frame > 0:
         capture.set(CV_CAP_PROP_POS_FRAMES,start_frame)
@@ -109,7 +109,7 @@ def convert_list(list_file,database_name,root_directory,
                 filename, label = line.split()
                 print "Processing", filename, "..."                
                 
-                label = int(label)
+                label = int(label) - 1 # So its zero-indexed
                 full_filename = os.path.join(root_directory,filename)                
                 clip = read_clip(capture,full_filename,num_frames,height=height,
                                  width=width,start_frame=start_frame)
@@ -133,6 +133,7 @@ def convert_list(list_file,database_name,root_directory,
                 print "Warning: could not write batch %d to database" % batch_num
             
             data = []
+            keys = []
             batch_num += 1
             
     env.close()

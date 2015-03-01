@@ -12,9 +12,10 @@ import numpy as np
 from src.convnet3d.convnet3d import PoolLayer,ConvLayer, dtensor5
 from src.convnet3d.mlp import LogRegr,DropoutHiddenLayer
 from src.convnet3d.activations import relu
+from src.convnet3d.datalayer import DataLayer
 
 class ConvNet3D(object):
-    def __init__(self,video_shape,batch_size=10,
+    def __init__(self,name,video_shape,batch_size,
                  seed=1234):
         """ Initializes a bare-bones ConvNet for video data.
         
@@ -24,12 +25,15 @@ class ConvNet3D(object):
                                       at a time, NOT training batch size.
             (int)   train_batch_size - number of data points per batch at train
         """
+        self.name = name
         self.layers = []
         self.data_loss = None        
         self.y_pred = None
         self.parameters = []
-        self.batch_size = batch_size # TODO: make this actually do
-                                                 # something
+        self.batch_size = batch_size # minibatch size
+        self.video_shape = video_shape
+        self.train_data = None
+        self.val_data = None
         
         # Store data in Theano shared variables, so it can be schlepped to GPU
         data_shape = (batch_size,3) + video_shape
@@ -43,6 +47,12 @@ class ConvNet3D(object):
         
         # Random number generator for replicable results
         self.rng = np.random.RandomState(seed)
+    
+    def add_train_data(self,db_name):
+        self.train_data = DataLayer(db_name,self.video_shape,self.batch_size)
+        
+    def add_val_data(self,db_name):
+        self.val_data = DataLayer(db_name,self.video_shape,self.batch_size)
         
     def add_conv_layer(self,name,filter_shape,num_filters):
         """ Add convolutional layer. Preserves input volume.
@@ -113,17 +123,36 @@ class ConvNet3D(object):
         # Expose some top level expressions
         self.y_pred = softmax.y_pred
         self.data_loss = softmax.negative_log_likelihood(self.y)
-        
+        # Mean accuracy over the total number of examples (in the minibatch)
+        self.accuracy = 1.0 - softmax.errors(self.y)
+
+def get_test_net():
+    batch_size = 2
+    video_shape = (16,240,320)
+    net = ConvNet3D("test",video_shape,batch_size)
     
-def test():
-    video_shape = (4,16,16)
-    net = ConvNet3D(video_shape)
-    num_classes = 5
+    # These tiny databases only contain one class
+    num_classes = 2
+    net.add_train_data("data/tinytraindb.lmdb")
+    net.add_val_data("data/tinyvaldb.lmdb")
     
     net.add_conv_layer("conv1",(3,3,3),2)
     net.add_pool_layer("pool1",(2,2,2))
     net.add_conv_layer("conv2",(1,3,3),4)
     net.add_fc_layer("fc1",10,0.9)
+    net.add_softmax_layer("softmax",num_classes)
+    
+    return net
+         
+def test():
+    video_shape = (4,16,16)
+    net = ConvNet3D("test",video_shape,10)
+    num_classes = 5
+    
+    net.add_conv_layer("conv1",(3,3,3),2)
+    net.add_pool_layer("pool1",(2,2,2))
+    net.add_conv_layer("conv2",(1,3,3),4)
+    net.add_fc_layer("fc1",10,0.8)
     net.add_softmax_layer("softmax",num_classes)
     
     N = 100

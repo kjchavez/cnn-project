@@ -21,7 +21,7 @@ class Datum4D():
     @staticmethod
     def array_to_datum(array,label):
         assert len(array.shape) == 4
-        assert (array.dtype == np.uint8)
+        assert (array.dtype == np.int16)
         assert (isinstance(label,int))
         value = np.array([label],dtype=np.uint32).tostring()
         value += np.array(array.shape,dtype=np.uint32).tostring()
@@ -36,5 +36,5 @@ class Datum4D():
         d = Datum4D()
         d.label = np.fromstring(string[0:4],dtype=np.uint32)[0]
         shape = np.fromstring(string[4:20],dtype=np.uint32)
-        d.array = np.fromstring(string[20:],dtype=np.uint8).reshape(shape)
+        d.array = np.fromstring(string[20:],dtype=np.int16).reshape(shape)
         return d

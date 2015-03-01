@@ -10,9 +10,14 @@ from src.dataio.datum import Datum4D
 from src.constants import *
 
 class DataFetcher(object):
-    def __init__(self,database_name):
+    def __init__(self,database_name,video_shape,dtype='float32'):
         self.db_name = database_name
         self.env = lmdb.open(database_name)
+        self.txn = self.env.begin()
+        self.cursor = self.txn.cursor()
+        self.cursor.first()
+        self.iterator = iter(self.cursor)
+        self.dtype = dtype
         self.epoch = 0
         
     def load_data(self,batch_size,video_shape):
@@ -23,28 +28,27 @@ class DataFetcher(object):
             video_shape - 3 tuple (frames, height, width) for videos
         """
         TT, HH, WW = video_shape
-        X = np.empty((batch_size,3) + video_shape,dtype=np.uint8)
-        y = np.empty((batch_size,),dtype=np.uint32)
-        with self.env.begin() as txn:
-            cursor = txn.cursor()
-            it = iter(cursor)
-            for n in xrange(batch_size):
-                try:
-                    key,value = next(it)
-                except StopIteration:
-                    cursor.first() # reset to beginning
-                    it = iter(cursor)
-                    print "DataFetcher: Completed epoch", self.epoch
-                    self.epoch += 1
-                    key,value = next(it)
-                    
-                datum = Datum4D.fromstring(value)
-                X[n] = datum.array
-                y[n] = datum.label
+        X = np.empty((batch_size,3) + video_shape,dtype=self.dtype)
+        y = np.empty((batch_size,),dtype=self.dtype)
+        crossed_epoch = False
+        for n in xrange(batch_size):
+            try:
+                key,value = next(self.iterator)
+            except StopIteration:
+                self.cursor.first() # reset to beginning
+                self.iterator = iter(self.cursor)
+                crossed_epoch = True
+                self.epoch += 1
+                key,value = next(self.iterator)
                 
-        return X, y
+            datum = Datum4D.fromstring(value)
+            X[n] = datum.array
+            y[n] = datum.label
+                
+        return X, y, crossed_epoch
                 
     def __del__(self):
+        self.txn.commit()
         self.env.close()
 
 
@@ -52,16 +56,16 @@ def test():
     import time
     import cv2
     
-    db = "data/tinyvideodb.lmdb"
+    db = "data/traindb.lmdb"
     shape = (16,240,320)
-    fetcher = DataFetcher(db)
+    fetcher = DataFetcher(db,shape)
     
     # Fetch from database, possibly overflowing and repeating
     tic = time.time()
-    X, y = fetcher.load_data(100,shape)
+    X, y, _ = fetcher.load_data(50,shape)
     toc = time.time()
-    im = X[10,:,0].transpose(1,2,0) + APPROXIMATE_MEAN
-    cv2.imshow("window",im)
+    im = X[0,:,0].transpose(1,2,0) + APPROXIMATE_MEAN
+    cv2.imshow("window",im.astype('uint8'))
     print "Retrieved %d videos in %0.4f milliseconds" % (X.shape[0],1000*(toc-tic))
     print "Average retrieval time: %0.3f ms" % (1000*(toc-tic)/X.shape[0])
 
