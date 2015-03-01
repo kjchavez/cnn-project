@@ -179,13 +179,13 @@ def optical_flow_regularizer(kernel,kernel_shape,
     bc_penalty = T.sum(bc_diff * bc_diff)
     
     # Smoothness constraint
-    Vxdx = Vx[:,:,:,1:] - Vx[:,:,:,0:-1]
-    Vxdy = Vx[:,:,1:,:] - Vx[:,:,0:-1,:]
-    Vxdt = Vx[:,1:,:,:] - Vx[:,0:-1,:,:]
+    Vxdx = Vx[:,:,:,1:] - Vx[:,:,:,0:WW-1]
+    Vxdy = Vx[:,:,1:,:] - Vx[:,:,0:HH-1,:]
+    Vxdt = Vx[:,1:,:,:] - Vx[:,0:TT-1,:,:]
 
-    Vydx = Vy[:,:,:,1:] - Vy[:,:,:,0:-1]
-    Vydy = Vy[:,:,1:,:] - Vy[:,:,0:-1,:]
-    Vydt = Vy[:,1:,:,:] - Vy[:,0:-1,:,:]
+    Vydx = Vy[:,:,:,1:] - Vy[:,:,:,0:WW-1]
+    Vydy = Vy[:,:,1:,:] - Vy[:,:,0:HH-1,:]
+    Vydt = Vy[:,1:,:,:] - Vy[:,0:TT-1,:,:]
     
     if smoothness == 'L1':
         smoothness_penalty =  T.sum(abs(Vxdx)) + \
@@ -241,13 +241,13 @@ def optical_flow_regularizer(kernel,kernel_shape,
     opt_bc_penalty = T.sum(bc_diff_star * bc_diff_star)
     
     # Smoothness constraint
-    Vxdx_star = Vx_star[:,:,:,1:] - Vx_star[:,:,:,0:-1]
-    Vxdy_star = Vx_star[:,:,1:,:] - Vx_star[:,:,0:-1,:]
-    Vxdt_star = Vx_star[:,1:,:,:] - Vx_star[:,0:-1,:,:]
+    Vxdx_star = Vx_star[:,:,:,1:] - Vx_star[:,:,:,0:WW-1]
+    Vxdy_star = Vx_star[:,:,1:,:] - Vx_star[:,:,0:HH-1,:]
+    Vxdt_star = Vx_star[:,1:,:,:] - Vx_star[:,0:TT-1,:,:]
 
-    Vydx_star = Vy_star[:,:,:,1:] - Vy_star[:,:,:,0:-1]
-    Vydy_star = Vy_star[:,:,1:,:] - Vy_star[:,:,0:-1,:]
-    Vydt_star = Vy_star[:,1:,:,:] - Vy_star[:,0:-1,:,:]
+    Vydx_star = Vy_star[:,:,:,1:] - Vy_star[:,:,:,0:WW-1]
+    Vydy_star = Vy_star[:,:,1:,:] - Vy_star[:,:,0:HH-1,:]
+    Vydt_star = Vy_star[:,1:,:,:] - Vy_star[:,0:TT-1,:,:]
     
     if smoothness == 'L1':
         opt_smoothness_penalty = T.sum(abs(Vxdx_star)) + \

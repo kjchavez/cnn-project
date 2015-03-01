@@ -21,17 +21,12 @@ class Solver:
         learning_rate_decay = lr_params['decay']
         self.step_rate = lr_params['step'] # in number of minibatches        
         
-        ######################
-        # BUILD ACTUAL MODEL #
-        ######################
-    
-        print '... building the model'
-    
         # allocate symbolic variables for the data
         index = T.lscalar()    # index to a minibatch
         self.learning_rate = theano.shared(np.asarray(initial_learning_rate,
             dtype=theano.config.floatX))
 
+        print "Compiling validation function..."
         # Compile theano function for validation.
         val_X = conv_net.val_data.X
         val_y = conv_net.val_data.y
@@ -86,6 +81,7 @@ class Solver:
             stepped_param = param - self.learning_rate * gparam / (T.sqrt(cached)+1e-8)
             updates[param] = stepped_param
     
+        print "Compiling train function..."
         # Compile theano function for training.  This returns the training cost and
         # updates the model parameters.
         train_X = conv_net.train_data.X
@@ -119,50 +115,66 @@ class Solver:
             
         return np.mean(accuracies)
             
-    def train(self,n_epochs,snapshot_params):
+    def train(self,n_iter,snapshot_params,validate_rate=100,loss_rate=10):
+        """ Train the solvers network for a number of iterations.
+        
+        Args:
+            n_iter:          number of minibatches to train with
+            snapshot_params: a dictionary of parameters dictating when and
+                             where to save snapshots of the model
+            validate_rate:   compute and print validation accuracy every this
+                             many iterations of training
+            loss_rate:       print minibatch training loss every loss_rate iters
+        """
         snapshot_rate = snapshot_params['rate']
         snapshot_dir = snapshot_params['dir']
         if not os.path.isdir(snapshot_dir):
             os.makedirs(snapshot_dir)
         filepattern = os.path.join(
                         snapshot_dir,
-                        self.conv_net.name+".snapshot.epoch.%04d.val.%0.4f")
+                        self.conv_net.name+".snapshot.iter-%06d.val-%0.4f")
             
         best_validation_acc = 0
         epoch_counter = 0
         start_time = time.clock()
 
         print "Starting training..."    
-        while epoch_counter < n_epochs:
+        for iteration in xrange(n_iter):
             epoch_ended = self.conv_net.train_data.load_batch()
 
             if epoch_ended:
                 epoch_counter += 1
+                print "Completed epoch %d" % epoch_counter
+                
+            if iteration % validate_rate == 0:
                 # Compute accuracy on validation set
                 val_accuracy = self.validate()
                 
-                print "epoch %d, val accuracy = %0.4f, learning rate = %0.4e" % \
-                        (epoch_counter,val_accuracy,self.learning_rate.get_value())
+                print "iter %d, val accuracy = %0.4f, learning rate = %0.4e" % \
+                        (iteration,val_accuracy,self.learning_rate.get_value())
                         
                 if (val_accuracy > best_validation_acc):
                     print "** Best score so far **"
                 
                 best_validation_acc = max(best_validation_acc,val_accuracy)
-                new_learning_rate = self.decay_learning_rate()
                 
-                if epoch_counter % snapshot_rate == 0:
-                    # Save a snapshot of the parameters
-                    params = {}
-                    for param in self.conv_net.parameters:
-                        params[param.name] = param.get_value(borrow=True)
-                    
-                    filename = filepattern % (epoch_counter,val_accuracy)
-                    with open(filename,'w') as fp:
-                        cPickle.dump(params,fp)
+            if iteration % self.step_rate == 0:
+                self.decay_learning_rate()
+                
+            if iteration % snapshot_rate == 0:
+                # Save a snapshot of the parameters
+                params = {}
+                for param in self.conv_net.parameters:
+                    params[param.name] = param.get_value(borrow=True)
+                
+                filename = filepattern % (iteration,val_accuracy)
+                with open(filename,'w') as fp:
+                    cPickle.dump(params,fp)
                             
             # Train this batch
             minibatch_avg_cost = self.train_model(0)
-            print "Cost:", minibatch_avg_cost
+            if iteration % loss_rate == 0:
+                print "minibatch loss:", minibatch_avg_cost
             
                     
         end_time = time.clock()
@@ -176,15 +188,15 @@ def test():
     net = get_test_net()
     lr_params = {'rate': 1e-8, 'decay': 0.95, 'step': 1}
     reg_params = {'conv1_W': 0.1,'conv2_W': 0.2,'fc1_W': 0.3,'softmax_W':0.1}
-    snapshot_params = {"dir": "models/"+net.name,"rate":1}
+    snapshot_params = {"dir": "models/"+net.name,"rate":2}
     
     rmsprop_decay = 0.99
     solver = Solver(net,reg_params,lr_params,rmsprop_decay)
-    solver.train(3,snapshot_params)
+    solver.train(8,snapshot_params,validate_rate=2,loss_rate=1)
     
 if __name__ == "__main__":
     from src.convnet3d.cnn3d import get_test_net
-    if sys.argv[1] == "-v":
+    if len(sys.argv) > 1 and sys.argv[1] == "-v":
         theano.config.exception_verbosity = "high"
         
     test()

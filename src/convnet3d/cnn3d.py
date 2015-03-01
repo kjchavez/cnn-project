@@ -138,7 +138,7 @@ def get_test_net():
     
     net.add_conv_layer("conv1",(3,3,3),2)
     net.add_pool_layer("pool1",(2,2,2))
-    net.add_conv_layer("conv2",(1,3,3),4)
+    net.add_conv_layer("conv2",(1,3,3),2)
     net.add_fc_layer("fc1",10,0.9)
     net.add_softmax_layer("softmax",num_classes)
     
