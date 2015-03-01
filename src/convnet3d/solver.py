@@ -5,7 +5,7 @@ Created on Fri Feb 27 19:08:50 2015
 
 @author: Kevin Chavez
 """
-import os
+import sys, os
 import time
 import theano
 import theano.tensor as T
@@ -131,7 +131,8 @@ class Solver:
         best_validation_acc = 0
         epoch_counter = 0
         start_time = time.clock()
-    
+
+        print "Starting training..."    
         while epoch_counter < n_epochs:
             epoch_ended = self.conv_net.train_data.load_batch()
 
@@ -183,4 +184,7 @@ def test():
     
 if __name__ == "__main__":
     from src.convnet3d.cnn3d import get_test_net
+    if sys.argv[1] == "-v":
+        theano.config.exception_verbosity = "high"
+        
     test()
