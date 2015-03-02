@@ -42,11 +42,11 @@ class Solver:
             dtype=theano.config.floatX))
             
         # Functions for updating hyper parameters after each epoch
-        self.decay_momentum = \
+        self.increase_momentum = \
             theano.function(
                 inputs=[], 
-                outputs=self.momentum,
-                updates={self.momentum: self.momentum - momentum_step})
+                outputs=self.momentum+momentum_step,
+                updates={self.momentum: self.momentum + momentum_step})
         
         self.decay_learning_rate = \
             theano.function(
@@ -207,8 +207,9 @@ class Solver:
                 print "Completed epoch %d" % epoch_counter
                 self.decay_learning_rate()
                 if self.method == "momentum":
-                    if self.momentum.get_value() > self.final_momentum:
-                        self.decay_momentum()
+                    if self.momentum.get_value() < self.final_momentum:
+                        momentum = self.increase_momentum()
+                        print "  new momentum = %0.4f" % momentum
                 
             if iteration % validate_rate == 0:
                 # Compute accuracy on validation set
