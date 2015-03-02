@@ -10,7 +10,7 @@ import theano
 import theano.tensor as T
 import numpy as np
 import time
-
+import matplotlib.pyplot as plt
 import cv2
 from src.constants import *
 APPROXIMATE_MEAN = 127
@@ -96,10 +96,12 @@ def test_random_filter():
     loss, updates, grad = optical_flow_regularizer(kernel,(N,C,TT,H,W))
     
     lr = 0.01
+    print "Compiling loss function...."
     loss_fn = theano.function(
                 inputs=[],
                 outputs=[loss,grad],
                 updates=updates+[(kernel, kernel - lr*grad)])
+    print "Done."
     
     #loss_fn2 = theano.function(
     #            inputs=[],
