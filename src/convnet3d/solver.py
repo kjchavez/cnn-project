@@ -137,15 +137,25 @@ class Solver:
                 
         filepattern = os.path.join(
                         snapshot_dir,
-                        self.conv_net.name+".snapshot.iter-%06d.val-%0.4f")
+                        self.conv_net.name+".snapshot.iter-%06d")
             
         best_validation_acc = 0
+        val_history_filename = os.path.join(snapshot_dir,"validation-history.txt")
         epoch_counter = 0
         start_time = time.clock()
 
         print "Starting training..."    
         for iteration in xrange(n_iter):
             epoch_ended = self.conv_net.train_data.load_batch()
+
+            # Train this batch
+            minibatch_avg_cost = self.train_model(0)
+                                                                
+            if iteration % loss_rate == 0:
+                print "minibatch loss:", minibatch_avg_cost
+
+            if iteration == 0:
+                continue
 
             if epoch_ended:
                 epoch_counter += 1
@@ -157,9 +167,16 @@ class Solver:
                 
                 print "iter %d, val accuracy = %0.4f, learning rate = %0.4e" % \
                         (iteration,val_accuracy,self.learning_rate.get_value())
+                
+                with open(val_history_filename,'a') as fp:
+                    print >> fp, iteration, val_accuracy
                         
                 if (val_accuracy > best_validation_acc):
                     print "** Best score so far **"
+                    filename = os.path.join(snapshot_dir,"best-model")
+                    with open(filename,'wb') as fp:
+                        for param in self.conv_net.parameters:
+                            cPickle.dump(param.get_value(borrow=True),fp,-1)
                 
                 best_validation_acc = max(best_validation_acc,val_accuracy)
                 
@@ -168,17 +185,11 @@ class Solver:
                 
             if iteration % snapshot_rate == 0:
                 # Save a snapshot of the parameters
-                filename = filepattern % (iteration,val_accuracy)
+                filename = filepattern % (iteration,)
                 with open(filename,'wb') as fp:
                     for param in self.conv_net.parameters:
                         cPickle.dump(param.get_value(borrow=True),fp,-1)
-                            
-            # Train this batch
-            minibatch_avg_cost = self.train_model(0)
-            if iteration % loss_rate == 0:
-                print "minibatch loss:", minibatch_avg_cost
             
-                    
         end_time = time.clock()
         print(('Optimization complete. Best validation score of %f %% ') %
               (best_validation_acc * 100))
