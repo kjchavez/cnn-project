@@ -46,7 +46,6 @@ class ConvLayer(object):
             # fan in: filter time x filter height x filter width x input maps
             fan_in = prod(kernel_shape)*n_in_maps
             norm_scale = 2. * sqrt( 1. / fan_in )
-            if activation in (relu,softplus): norm_scale = 0.01
             W_shape = (n_out_maps, n_in_maps)+kernel_shape
             W_val = _asarray(rng.normal(loc=0, scale=norm_scale, size=W_shape),\
                         dtype=floatX)
