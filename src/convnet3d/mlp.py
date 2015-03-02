@@ -107,7 +107,7 @@ def _dropout_from_layer(rng, layer, p):
     mask = srng.binomial(n=1, p=1-p, size=layer.shape)
     # The cast is important because
     # int * float32 = float64 which pulls things off the gpu
-    output = layer * T.cast(mask, theano.config.floatX)
+    output = layer * T.cast(mask, theano.config.floatX) / (1. - p)
     return output
 
 class DropoutHiddenLayer(HiddenLayer):
