@@ -15,16 +15,44 @@ from src.convnet3d.regularization import *
 from collections import OrderedDict
 
 class Solver:
-    def __init__(self,conv_net,reg_params,lr_params,rmsprop_decay):
+    def __init__(self,conv_net,reg_params,opt_params):
         self.conv_net = conv_net
-        initial_learning_rate = lr_params['rate']
-        learning_rate_decay = lr_params['decay']
-        self.step_rate = lr_params['step'] # in number of minibatches        
+        self.method = opt_params["method"]
+        base_learning_rate = opt_params["lr_base"]
+        if self.method == "rmsprop":
+            rmsprop_decay = opt_params['rmsprop_decay']
+        elif self.method == "momentum":
+            momentum = opt_params['initial']
+            self.final_momentum = opt_params['final']
+            momentum_step = opt_params['step']
+        else:
+            raise NotImplemented("Optimization method %s is not implemented" %
+                                 opt_params["method"])
+
+        learning_rate_decay = opt_params['lr_decay']    
         
-        # allocate symbolic variables for the data
-        index = T.lscalar()    # index to a minibatch
-        self.learning_rate = theano.shared(np.asarray(initial_learning_rate,
+        # Might be unnecessary... I think our minibatch is limited by the amount
+        # of GPU memory so we'll only ever use index = 0....
+        index = T.lscalar()
+        
+        # Hyper parameters that will change during the course of training
+        self.momentum = theano.shared(np.asarray(momentum,
+                                             dtype=theano.config.floatX))
+        self.learning_rate = theano.shared(np.asarray(base_learning_rate,
             dtype=theano.config.floatX))
+            
+        # Functions for updating hyper parameters after each epoch
+        self.decay_momentum = \
+            theano.function(
+                inputs=[], 
+                outputs=self.momentum,
+                updates={self.momentum: self.momentum - momentum_step})
+        
+        self.decay_learning_rate = \
+            theano.function(
+                inputs=[], 
+                outputs=self.learning_rate,
+                updates={self.learning_rate: self.learning_rate * learning_rate_decay})
 
         print "Compiling validation function..."
         # Compile theano function for validation.
@@ -37,7 +65,7 @@ class Solver:
                 givens={
                     conv_net.X: val_X[index * batch_size:(index + 1) * batch_size],
                     conv_net.y: val_y[index * batch_size:(index + 1) * batch_size]})
-        #theano.printing.pydotprint(test_model, outfile="test_file.png",
+        #theano.printing.pydotprint(validate_model, outfile="test_file.png",
         #        var_with_name_simple=True)
         
         # Compute gradients of the model wrt parameters. We will also explicitly
@@ -58,29 +86,53 @@ class Solver:
                 gparams.append(gparam + reg_params[param.name]*reg_grad)
             else:
                 gparams.append(gparam)
+
+        # Container to hold parameter updates regardless of optimization scheme
+        updates = OrderedDict()    
     
-        # #####################################################################
-        # RMS Prop. 
-        # See Geoff Hinton's slides. Or the material for CS231N at Stanford. 
-        # Great resource!
-        #######################################################################
-        rmsprop_cache = []
-        for param in conv_net.parameters:
-            cache = theano.shared(np.zeros(param.get_value(borrow=True).shape,
-                dtype=theano.config.floatX))
-            rmsprop_cache.append(cache)
-   
-        # Update the rms prop cache
-        updates = OrderedDict()
-        for cached, gparam in zip(rmsprop_cache, gparams):
-            # change the update rule to match Hinton's dropout paper
-            updates[cached] = rmsprop_decay * cached  + (1-rmsprop_decay) * T.square(gparam)
+        if self.method == 'rmsprop':
+            # #####################################################################
+            # RMS Prop. 
+            # See Geoff Hinton's slides. Or the material for CS231N at Stanford. 
+            # Great resource!
+            #######################################################################
+            rmsprop_cache = []
+            for param in conv_net.parameters:
+                cache = theano.shared(np.zeros(param.get_value(borrow=True).shape,
+                    dtype=theano.config.floatX))
+                rmsprop_cache.append(cache)
+       
+            # Update the rms prop cache
+            for cached, gparam in zip(rmsprop_cache, gparams):
+                # change the update rule to match Hinton's dropout paper
+                updates[cached] = rmsprop_decay * cached  + (1-rmsprop_decay) * T.square(gparam)
+                
+            # ... and take a gradient step
+            for param, gparam, cached in zip(conv_net.parameters,gparams,rmsprop_cache):
+                stepped_param = param - self.learning_rate * gparam / (T.sqrt(cached)+1e-8)
+                updates[param] = stepped_param
             
-        # ... and take a gradient step
-        for param, gparam, cached in zip(conv_net.parameters,gparams,rmsprop_cache):
-            stepped_param = param - self.learning_rate * gparam / (T.sqrt(cached)+1e-8)
-            updates[param] = stepped_param
-    
+        if self.method == "momentum":
+                # ... and allocate mmeory for momentum'd versions of the gradient
+            momenta = []
+            for param in conv_net.parameters:
+                m = theano.shared(np.zeros(param.get_value(borrow=True).shape,
+                    dtype=theano.config.floatX))
+                momenta.append(m)
+        
+            # Update the step direction using momentum
+            updates = OrderedDict()
+            for gparam_mom, gparam in zip(momenta, gparams):
+                # change the update rule to match Hinton's dropout paper
+                updates[gparam_mom] = momentum * gparam_mom - (1. - momentum) \
+                                      * self.learning_rate * gparam
+                
+            for param, gparam_mom in zip(conv_net.parameters, momenta):
+                # since we have included learning_rate in gparam_mom, 
+                # we don't need it here
+                stepped_param = param + updates[gparam_mom]
+                updates[param] = stepped_param
+            
         print "Compiling train function..."
         # Compile theano function for training.  This returns the training cost and
         # updates the model parameters.
@@ -97,14 +149,7 @@ class Solver:
         #theano.printing.pydotprint(train_model, outfile="train_file.png",
         #        var_with_name_simple=True)
     
-        # Theano function to decay the learning rate, this is separate from the
-        # training function because we only want to do this once each epoch instead
-        # of after each minibatch.
-        self.decay_learning_rate = \
-            theano.function(
-                inputs=[], 
-                outputs=self.learning_rate,
-                updates={self.learning_rate: self.learning_rate * learning_rate_decay})
+
                 
     def validate(self):
         epoch_ended = False
@@ -160,6 +205,10 @@ class Solver:
             if epoch_ended:
                 epoch_counter += 1
                 print "Completed epoch %d" % epoch_counter
+                self.decay_learning_rate()
+                if self.method == "momentum":
+                    if self.momentum.get_value() > self.final_momentum:
+                        self.decay_momentum()
                 
             if iteration % validate_rate == 0:
                 # Compute accuracy on validation set
@@ -179,10 +228,7 @@ class Solver:
                             cPickle.dump(param.get_value(borrow=True),fp,-1)
                 
                 best_validation_acc = max(best_validation_acc,val_accuracy)
-                
-            if iteration % self.step_rate == 0:
-                self.decay_learning_rate()
-                
+                                
             if iteration % snapshot_rate == 0:
                 # Save a snapshot of the parameters
                 filename = filepattern % (iteration,)
@@ -199,13 +245,19 @@ class Solver:
 
 def test():
     net = get_test_net()
-    lr_params = {'rate': 1e-8, 'decay': 0.95, 'step': 1}
-    reg_params = {'conv1_W': 0.1,'conv2_W': 0.2,'fc1_W': 0.3,'softmax_W':0.1}
+    opt_params = {
+        "method": "momentum",
+        "initial": 0.5,
+        "final": 0.9,
+        "step": 0.1, # per epoch
+        "lr_decay": 0.95,
+        "lr_base": 1e-1}
+
+    reg_params = {} #{'conv1_W': 0.1,'conv2_W': 0.2,'fc1_W': 0.3,'softmax_W':0.1}
     snapshot_params = {"dir": "models/"+net.name,"rate":2}
     
-    rmsprop_decay = 0.99
-    solver = Solver(net,reg_params,lr_params,rmsprop_decay)
-    solver.train(8,snapshot_params,validate_rate=2,loss_rate=1)
+    solver = Solver(net,reg_params,opt_params)
+    solver.train(50,snapshot_params,validate_rate=2,loss_rate=1)
     
 if __name__ == "__main__":
     from src.convnet3d.cnn3d import get_test_net
