@@ -35,24 +35,25 @@ class Solver:
         # of GPU memory so we'll only ever use index = 0....
         index = T.lscalar()
         
-        # Hyper parameters that will change during the course of training
-        self.momentum = theano.shared(np.asarray(momentum,
-                                             dtype=theano.config.floatX))
         self.learning_rate = theano.shared(np.asarray(base_learning_rate,
             dtype=theano.config.floatX))
-            
-        # Functions for updating hyper parameters after each epoch
-        self.increase_momentum = \
-            theano.function(
-                inputs=[], 
-                outputs=self.momentum+momentum_step,
-                updates={self.momentum: self.momentum + momentum_step})
-        
+
         self.decay_learning_rate = \
             theano.function(
                 inputs=[], 
                 outputs=self.learning_rate,
                 updates={self.learning_rate: self.learning_rate * learning_rate_decay})
+                
+
+        if self.method == "momentum":
+            self.momentum = theano.shared(np.asarray(momentum,
+                                          dtype=theano.config.floatX))
+            self.increase_momentum = \
+                theano.function(
+                    inputs=[], 
+                    outputs=self.momentum+momentum_step,
+                    updates={self.momentum: self.momentum + momentum_step})
+            
 
         print "Compiling validation function..."
         # Compile theano function for validation.
@@ -186,15 +187,18 @@ class Solver:
             
         best_validation_acc = 0
         val_history_filename = os.path.join(snapshot_dir,"validation-history.txt")
+        loss_history_filename = os.path.join(snapshot_dir,"loss-history.txt")
         epoch_counter = 0
         start_time = time.clock()
 
         print "Starting training..."    
+        loss_history = []
         for iteration in xrange(n_iter):
             epoch_ended = self.conv_net.train_data.load_batch()
 
             # Train this batch
             minibatch_avg_cost = self.train_model(0)
+            loss_history.append(minibatch_avg_cost)
                                                                 
             if iteration % loss_rate == 0:
                 print "minibatch loss:", minibatch_avg_cost
@@ -220,6 +224,12 @@ class Solver:
                 
                 with open(val_history_filename,'a') as fp:
                     print >> fp, iteration, val_accuracy
+                
+                # Flush loss history
+                with open(loss_history_filename,'a') as fp:
+                    for loss in loss_history:
+                        print >> fp, loss
+                    loss_history = []
                         
                 if (val_accuracy > best_validation_acc):
                     print "** Best score so far **"
@@ -258,7 +268,7 @@ def test():
     snapshot_params = {"dir": "models/"+net.name,"rate":2}
     
     solver = Solver(net,reg_params,opt_params)
-    solver.train(50,snapshot_params,validate_rate=2,loss_rate=1)
+    solver.train(60,snapshot_params,validate_rate=2,loss_rate=1)
     
 if __name__ == "__main__":
     from src.convnet3d.cnn3d import get_test_net
