@@ -130,6 +130,11 @@ class Solver:
         snapshot_dir = snapshot_params['dir']
         if not os.path.isdir(snapshot_dir):
             os.makedirs(snapshot_dir)
+        # Write the list of parameters:
+        with open(os.path.join(snapshot_dir,"parameter-names.txt"),'w') as fp:
+            for param in self.conv_net.parameters:
+                print >> fp, param.name
+                
         filepattern = os.path.join(
                         snapshot_dir,
                         self.conv_net.name+".snapshot.iter-%06d.val-%0.4f")
@@ -163,13 +168,10 @@ class Solver:
                 
             if iteration % snapshot_rate == 0:
                 # Save a snapshot of the parameters
-                params = {}
-                for param in self.conv_net.parameters:
-                    params[param.name] = param.get_value(borrow=True)
-                
                 filename = filepattern % (iteration,val_accuracy)
-                with open(filename,'w') as fp:
-                    cPickle.dump(params,fp)
+                with open(filename,'wb') as fp:
+                    for param in self.conv_net.parameters:
+                        cPickle.dump(param.get_value(borrow=True),fp,-1)
                             
             # Train this batch
             minibatch_avg_cost = self.train_model(0)

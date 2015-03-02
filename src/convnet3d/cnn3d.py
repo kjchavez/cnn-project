@@ -131,8 +131,7 @@ def get_test_net():
     video_shape = (16,240,320)
     net = ConvNet3D("test",video_shape,batch_size)
     
-    # These tiny databases only contain one class
-    num_classes = 2
+    num_classes = 101
     net.add_train_data("data/tinytraindb.lmdb")
     net.add_val_data("data/tinyvaldb.lmdb")
     

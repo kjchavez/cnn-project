@@ -16,7 +16,7 @@ seed = 1234
 # Baseline A: Small CNN
 smallnet = ConvNet3D("small-net",video_shape,batch_size,seed=seed)
 smallnet.add_train_data("data/traindb.lmdb")
-smallnet.add_val_data("data/tinyvaldb.lmdb")
+smallnet.add_val_data("data/valdb.lmdb")
 smallnet.add_conv_layer("conv1",(3,3,3),4)
 smallnet.add_pool_layer("pool1",(2,2,2))
 smallnet.add_conv_layer("conv2",(3,3,3),4)
