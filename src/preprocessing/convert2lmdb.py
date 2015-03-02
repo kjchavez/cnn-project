@@ -21,6 +21,7 @@ KEY_BATCH_SIZE = 10000
 def read_clip(capture, video_filename, num_frames, 
               height=-1, width=-1, start_frame=0, mean_subtract=True):
     success = capture.open(video_filename)
+    
     if not success:
         print "Couldn't open video"
         print "Crashed at index %d." % index
@@ -35,6 +36,9 @@ def read_clip(capture, video_filename, num_frames,
     bottom = top + height
     left = (capture.get(CV_CAP_PROP_FRAME_WIDTH) - width)/2
     right = left + width
+    
+    if num_frames < 0:
+        num_frames = int(capture.get(CV_CAP_PROP_FRAME_COUNT))
 
     clip = np.empty((3,num_frames,height,width),dtype=np.int16)
     
@@ -55,6 +59,8 @@ def read_clip(capture, video_filename, num_frames,
         else:
             clip[:,i] = frame[top:bottom, left:right, :].transpose(2,0,1)
 
+    capture.release() # Shouldn't have to do this explicitly, but otherwise
+                      # it crashes on certain machines after a number of videos
     return clip
     
 def create_datum(clip,label):
@@ -158,6 +164,10 @@ def main():
                         help="Maximum size of lmdb database")
     parser.add_argument("--randomize",'-r',action="store_true",
                         default=False)
+#    parser.add_argument("--cuts",'-c',type=int,default=1,
+#                        help="Number of temporal cuts to take from video. The"
+#                             " first cut will start from the first frame, then"
+#                             " staggered, possibly overlapping.")
 
     args = parser.parse_args()
     

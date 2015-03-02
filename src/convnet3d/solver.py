@@ -185,7 +185,7 @@ class Solver:
                         snapshot_dir,
                         self.conv_net.name+".snapshot.iter-%06d")
             
-        best_validation_acc = 0
+        best_validation_acc = -1.0
         val_history_filename = os.path.join(snapshot_dir,"validation-history.txt")
         loss_history_filename = os.path.join(snapshot_dir,"loss-history.txt")
         epoch_counter = 0
