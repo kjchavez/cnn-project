@@ -10,7 +10,7 @@ from src.convnet3d.cnn3d import ConvNet3D
 from src.convnet3d.solver import Solver
 
 video_shape = (16,240,320)
-batch_size = 4
+batch_size = 1
 seed = 1234
 
 # Baseline A: Small CNN
@@ -37,15 +37,17 @@ reg_params = {
     "fc1_W": reg,
     "softmax_W": reg}
 
-lr_params = {
-    "rate": 1e-9,
-    "decay": 0.95,
-    "step": 2000}
-
-rmsprop_decay = 0.99
 snapshot_params = {
     "dir": "models/smallnet",
     "rate": 500}
 
-solver = Solver(smallnet,reg_params,lr_params,rmsprop_decay)
+opt_params = {
+    "method": "momentum",
+    "initial": 0.5,
+    "final": 0.9,
+    "step": 0.1, # per epoch
+    "lr_decay": 0.95,
+    "lr_base": 1e-4}
+
+solver = Solver(smallnet,reg_params,opt_params)
 solver.train(20000,snapshot_params,validate_rate=500,loss_rate=1)
