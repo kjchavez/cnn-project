@@ -19,7 +19,8 @@ MAX_ATTEMPTS = 3
 KEY_BATCH_SIZE = 10000
 
 def read_clip(capture, video_filename, num_frames, 
-              height=-1, width=-1, start_frame=0, mean_subtract=True):
+              height=-1, width=-1, start_frame=0, mean_subtract=True,
+              subsample=1):
     success = capture.open(video_filename)
     
     if not success:
@@ -40,7 +41,8 @@ def read_clip(capture, video_filename, num_frames,
     if num_frames < 0:
         num_frames = int(capture.get(CV_CAP_PROP_FRAME_COUNT))
 
-    clip = np.empty((3,num_frames,height,width),dtype=np.int16)
+    clip = np.empty((3,num_frames,height/subsample,width/subsample),
+                    dtype=np.int16)
     
     if start_frame > 0:
         capture.set(CV_CAP_PROP_POS_FRAMES,start_frame)
@@ -54,10 +56,10 @@ def read_clip(capture, video_filename, num_frames,
             break
             
         if mean_subtract:
-            clip[:,i] = frame[top:bottom, left:right, :].transpose(2,0,1) \
-                        - APPROXIMATE_MEAN
+            clip[:,i] = frame[top:bottom:subsample, left:right:subsample, :] \
+                            .transpose(2,0,1) - APPROXIMATE_MEAN
         else:
-            clip[:,i] = frame[top:bottom, left:right, :].transpose(2,0,1)
+            clip[:,i] = frame[top:bottom:subsample, left:right:subsample, :].transpose(2,0,1)
 
     capture.release() # Shouldn't have to do this explicitly, but otherwise
                       # it crashes on certain machines after a number of videos
@@ -90,7 +92,7 @@ def write_to_lmdb(env, keys, data):
         
 def convert_list(list_file,database_name,root_directory,
                  num_frames=16,width=-1,height=-1,start_frame=0,batch_size=10,
-                 map_size=100e6,randomize=False):
+                 map_size=100e6,randomize=False,subsample=1):
 
     capture = cv2.VideoCapture()
     env = lmdb.open(database_name,map_size=map_size,writemap=True)
@@ -118,7 +120,8 @@ def convert_list(list_file,database_name,root_directory,
                 label = int(label) - 1 # So its zero-indexed
                 full_filename = os.path.join(root_directory,filename)                
                 clip = read_clip(capture,full_filename,num_frames,height=height,
-                                 width=width,start_frame=start_frame)
+                                 width=width,start_frame=start_frame,
+                                 subsample=subsample)
                 datum = create_datum(clip,label)
                 data.append(datum)
 
@@ -164,17 +167,25 @@ def main():
                         help="Maximum size of lmdb database")
     parser.add_argument("--randomize",'-r',action="store_true",
                         default=False)
+    parser.add_argument("--subsample", type=int, default=1,
+                        help="ratio by which to subsample. Note width/height "
+                             "must be divisible by this")
 #    parser.add_argument("--cuts",'-c',type=int,default=1,
 #                        help="Number of temporal cuts to take from video. The"
 #                             " first cut will start from the first frame, then"
 #                             " staggered, possibly overlapping.")
 
     args = parser.parse_args()
+
+    if args.width > 0:
+        assert args.width % args.subsample == 0
+    if args.height > 0:
+        assert args.height % args.subsample == 0
     
     convert_list(args.input_file,args.database_name,args.root,
                  num_frames=args.length,width=args.width,height=args.height,
                  start_frame=0,batch_size=args.batchsize,map_size=args.mapsize,
-                 randomize=args.randomize)
+                 randomize=args.randomize,subsample=args.subsample)
 
 if __name__ == "__main__":
     main()
