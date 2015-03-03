@@ -93,14 +93,15 @@ def test_random_filter():
     original_frames = [kernel.get_value().copy()[0,:,i].transpose(1,2,0) \
                         + APPROXIMATE_MEAN for i in range(TT)]
     
-    loss, updates, grad = optical_flow_regularizer(kernel,(N,C,TT,H,W))
+    loss, updates, grad, vx, vy = \
+        optical_flow_regularizer(kernel,(N,C,TT,H,W))
     
     lr = 0.01
     print "Compiling loss function...."
     loss_fn = theano.function(
                 inputs=[],
                 outputs=[loss,grad],
-                updates=updates+[(kernel, kernel - lr*grad)])
+                updates=[(kernel, kernel - lr*grad)])
     print "Done."
     
     #loss_fn2 = theano.function(
@@ -165,10 +166,10 @@ def moving_edge_test():
         
         
     moving_edge = np.repeat(moving_edge,3,axis=1)
-    noise = 5*np.random.randn(*moving_edge.shape)
+    noise = 5.0*np.random.randn(*moving_edge.shape)
     moving_edge += noise
     original = np.copy(moving_edge)
-    display(original[0],None,None)
+    #display(original[0],None,None)
 
     kernel = theano.shared(
                 moving_edge.astype(theano.config.floatX),
@@ -179,11 +180,14 @@ def moving_edge_test():
         optical_flow_regularizer(kernel,(N,C,TT,H,W), gamma=3.)
         
     lr = 0.5
+    print "Compiling train function..."
     train = theano.function(
                 inputs=[],
                 outputs=[loss,grad, Vx, Vy],
                 updates=updates+[(kernel, kernel - lr*grad)])
                 
+    print "Done."
+
     for k in xrange(20):
         l, g, vx, vy = train()
         print "loss %0.2f, ||grad|| = %0.3f, ||W|| = %0.3f" % \
@@ -195,3 +199,4 @@ def moving_edge_test():
 
 if __name__ == "__main__":
     moving_edge_test()
+    #test_random_filter()

@@ -39,7 +39,7 @@ reg_params = {
 
 snapshot_params = {
     "dir": "models/smallnet",
-    "rate": 500}
+    "rate": 4000}
 
 opt_params = {
     "method": "momentum",
@@ -47,7 +47,7 @@ opt_params = {
     "final": 0.9,
     "step": 0.1, # per epoch
     "lr_decay": 0.95,
-    "lr_base": 1e-4}
+    "lr_base": 1e-5}
 
 solver = Solver(smallnet,reg_params,opt_params)
-solver.train(20000,snapshot_params,validate_rate=500,loss_rate=1)
+solver.train(40000,snapshot_params,validate_rate=4000,loss_rate=1)
