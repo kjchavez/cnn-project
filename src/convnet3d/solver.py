@@ -184,16 +184,39 @@ class Solver:
         filepattern = os.path.join(
                         snapshot_dir,
                         self.conv_net.name+".snapshot.iter-%06d")
-            
-        best_validation_acc = -1.0
-        val_history_filename = os.path.join(snapshot_dir,"validation-history.txt")
-        loss_history_filename = os.path.join(snapshot_dir,"loss-history.txt")
-        epoch_counter = 0
-        start_time = time.clock()
 
+                                
+        best_validation_acc = -1.0
+        best_validation_iter = None
+        loss_history_filename = os.path.join(snapshot_dir,"loss-history.txt")
+        first_iteration = 0
+        epoch_counter = 0
+                        
+        if 'resume' in snapshot_params and snapshot_params['resume'] is not None:
+            first_iteration = snapshot_params['resume'] + 1
+            with open(filepattern % snapshot_params['resume'],'rb') as fp:
+                for param in self.conv_net.parameters:
+                    val = cPickle.load(fp)
+                    param.set_value(val,borrow=True)
+
+        val_history_filename = os.path.join(snapshot_dir,"validation-history.txt")
+        if os.path.isfile(val_history_filename):
+            # Restore the previous best validation
+            val_hist = []
+            with open(val_history_filename) as fp:
+                for line in fp:
+                    it, val = line.split()
+                    val_hist.append((float(val),int(it)))
+                    
+            best_validation_acc, best_validation_iter = max(val_hist)
+            print "Restoring best validation accuracy of %0.4f at iteration %d" \
+                   % (best_validation_acc, best_validation_iter)
+
+
+        start_time = time.clock()
         print "Starting training..."    
         loss_history = []
-        for iteration in xrange(n_iter):
+        for iteration in xrange(first_iteration,first_iteration+n_iter):
             epoch_ended = self.conv_net.train_data.load_batch()
 
             # Train this batch
@@ -237,8 +260,9 @@ class Solver:
                     with open(filename,'wb') as fp:
                         for param in self.conv_net.parameters:
                             cPickle.dump(param.get_value(borrow=True),fp,-1)
-                
-                best_validation_acc = max(best_validation_acc,val_accuracy)
+                    
+                    best_validation_iter = iteration
+                    best_validation_acc = val_accuracy
                                 
             if iteration % snapshot_rate == 0:
                 # Save a snapshot of the parameters
@@ -253,6 +277,8 @@ class Solver:
         print >> sys.stderr, ('The code for file ' +
                               os.path.split(__file__)[1] +
                               ' ran for %.2fm' % ((end_time - start_time) / 60.))
+                              
+        return best_validation_acc, best_validation_iter
 
 def test():
     net = get_test_net()
