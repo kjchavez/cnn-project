@@ -7,6 +7,7 @@ Created on Sun Mar  1 14:47:40 2015
 @author: Kevin Chavez
 """
 import sys, os
+import shutil
 import argparse
 
 from src.convnet3d.cnn3d import ConvNet3D
@@ -81,10 +82,19 @@ def main():
         properties['video-shape'] = \
             tuple(int(x) for x in properties['video-shape'] \
                                   .strip('(').rstrip(')').split(','))
-    except e:
-        print e
+    except:
         print >> sys.stderr, "video-shape not in valid format"
         exit(1)
+
+    # Create directory to store results
+    savepath = os.path.join("models",properties['name']+"-%04d"%args.trial_id)
+    if os.path.isdir(savepath) and args.resume is None:
+        print "Attempted to overwrite %s with brand new training." % savepath
+        print "Training aborted. If you wish to proceed, please delete " \
+              "%s explicitly, then rerun command" % savepath
+        exit(1)
+    if not os.path.isdir(savepath):
+        os.makedirs(savepath)
     
     # Create convnet
     net = ConvNet3D(properties['name'],
@@ -134,9 +144,9 @@ def main():
             num_classes = int(num_classes_str)
             net.add_softmax_layer("softmax",num_classes)
             reg_multipliers["softmax_W"] = float(reg_mult.split('=')[1])
-
+        
     snapshot_params = {
-        "dir": "models/" + properties['name']+"-%04d"%args.trial_id,
+        "dir": "snapshots",
         "rate": args.snapshot_rate,
         "resume": args.resume}
     
@@ -153,11 +163,15 @@ def main():
     # Save the setting to the log file of hyper-parameter settings
     if not os.path.isdir('logs'):
         os.makedirs('logs')
+
+    # Copy the network architecture description file to the models folder
+    shutil.copy(args.net,os.path.join(savepath,'architecture.txt'))    
     
     solver = Solver(net,reg_params,opt_params)
     best_val_accuracy, best_val_iter = solver.train(
                                          args.num_iter,
                                          snapshot_params,
+                                         savepath,
                                          validate_rate=args.validate_rate,
                                          loss_rate=args.loss_rate)
 

@@ -161,7 +161,7 @@ class Solver:
             
         return np.mean(accuracies)
             
-    def train(self,n_iter,snapshot_params,validate_rate=100,loss_rate=10):
+    def train(self,n_iter,snapshot_params,savepath,validate_rate=100,loss_rate=10):
         """ Train the solvers network for a number of iterations.
         
         Args:
@@ -173,11 +173,11 @@ class Solver:
             loss_rate:       print minibatch training loss every loss_rate iters
         """
         snapshot_rate = snapshot_params['rate']
-        snapshot_dir = snapshot_params['dir']
+        snapshot_dir = os.path.join(savepath,snapshot_params['dir'])
         if not os.path.isdir(snapshot_dir):
             os.makedirs(snapshot_dir)
         # Write the list of parameters:
-        with open(os.path.join(snapshot_dir,"parameter-names.txt"),'w') as fp:
+        with open(os.path.join(savepath,"parameter-names.txt"),'w') as fp:
             for param in self.conv_net.parameters:
                 print >> fp, param.name
                 
@@ -188,8 +188,8 @@ class Solver:
                                 
         best_validation_acc = -1.0
         best_validation_iter = None
-        loss_history_filename = os.path.join(snapshot_dir,"loss-history.txt")
-        first_iteration = 0
+        loss_history_filename = os.path.join(savepath,"loss-history.txt")
+        first_iteration = 1
         epoch_counter = 0
                         
         if 'resume' in snapshot_params and snapshot_params['resume'] is not None:
@@ -199,7 +199,7 @@ class Solver:
                     val = cPickle.load(fp)
                     param.set_value(val,borrow=True)
 
-        val_history_filename = os.path.join(snapshot_dir,"validation-history.txt")
+        val_history_filename = os.path.join(savepath,"validation-history.txt")
         if os.path.isfile(val_history_filename):
             # Restore the previous best validation
             val_hist = []
@@ -225,9 +225,6 @@ class Solver:
                                                                 
             if iteration % loss_rate == 0:
                 print "minibatch loss:", minibatch_avg_cost
-
-            if iteration == 0:
-                continue
 
             if epoch_ended:
                 epoch_counter += 1
@@ -256,7 +253,7 @@ class Solver:
                         
                 if (val_accuracy > best_validation_acc):
                     print "** Best score so far **"
-                    filename = os.path.join(snapshot_dir,"best-model")
+                    filename = os.path.join(savepath,"best-model")
                     with open(filename,'wb') as fp:
                         for param in self.conv_net.parameters:
                             cPickle.dump(param.get_value(borrow=True),fp,-1)
