@@ -1,0 +1,16 @@
+name: tinynet
+video-shape: (16,112,112)
+train: data/tinytrainhalf.lmdb
+val: data/tinytrainhalf.lmdb
+batch-size: 2
+
+conv: (5,5,7) 2 reg=1
+pool: (2,2,2)
+conv: (3,3,3) 2 reg=1
+pool: (2,2,2)
+conv: (3,3,3) 2 reg=1
+pool: (2,2,2)
+conv: (3,3,3) 2 reg=1
+pool: (2,2,2)
+fc: 10 reg=1
+softmax: 101 reg=1

@@ -1,3 +1,4 @@
 *.pyc
 data/*
-models/*
+results/*
+
