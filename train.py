@@ -135,16 +135,14 @@ def train(net_file,trial_id,resume=None,seed=1234,dropout=[0.5],snapshot_rate=50
 
     # Copy the network architecture description file to the results folder
     shutil.copy(net_file,os.path.join(savepath,'architecture.txt'))    
-    print "about to solve"
+
     solver = Solver(net,reg_params,opt_params)
-    print "created solver"
     best_val_accuracy, best_val_iter = solver.train(
                                          num_iter,
                                          snapshot_params,
                                          savepath,
                                          validate_rate=validate_rate,
                                          loss_rate=loss_rate)
-    "solved"
     return best_val_accuracy, best_val_iter
     
 

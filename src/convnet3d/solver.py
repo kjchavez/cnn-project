@@ -139,7 +139,7 @@ class Solver:
         # updates the model parameters.
         train_X = conv_net.train_data.X
         train_y = conv_net.train_data.y
-        print updates
+
         self.train_model = \
             theano.function(
                 inputs = [index], 
