@@ -87,7 +87,7 @@ def main():
         exit(1)
 
     # Create directory to store results
-    savepath = os.path.join("models",properties['name']+"-%04d"%args.trial_id)
+    savepath = os.path.join("results",properties['name']+"-%04d"%args.trial_id)
     if os.path.isdir(savepath) and args.resume is None:
         print "Attempted to overwrite %s with brand new training." % savepath
         print "Training aborted. If you wish to proceed, please delete " \
@@ -159,12 +159,8 @@ def main():
         "lr_base": args.lr}
         
     reg_params = dict((param,mult*args.reg) for param,mult in reg_multipliers.items())
-           
-    # Save the setting to the log file of hyper-parameter settings
-    if not os.path.isdir('logs'):
-        os.makedirs('logs')
 
-    # Copy the network architecture description file to the models folder
+    # Copy the network architecture description file to the results folder
     shutil.copy(args.net,os.path.join(savepath,'architecture.txt'))    
     
     solver = Solver(net,reg_params,opt_params)
@@ -175,15 +171,17 @@ def main():
                                          validate_rate=args.validate_rate,
                                          loss_rate=args.loss_rate)
 
-    log_filename = 'logs/'+properties['name']+'-trials.txt'
+    log_filename = 'results/'+properties['name']+'-trials.txt'
     if not os.path.exists(log_filename):
         with open(log_filename,'w') as fp:
             print >> fp, '\t'.join(['trial-id','best-val-acc',
                                     'best-val-iter','settings'])
 
     with open(log_filename,'a') as fp:
-        print >> fp, "\t".join([str(args.trial_id),str(best_val_accuracy),
-                                str(best_val_iter),str(vars(args))])
+        print >> fp, "\t".join(["%04d" % args.trial_id,
+                                "%0.5f" % best_val_accuracy,
+                                str(best_val_iter),
+                                str(vars(args))])
 
 
 if __name__ == "__main__":
