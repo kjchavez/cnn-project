@@ -71,23 +71,13 @@ class HiddenLayer(object):
         layer_name="HiddenLayer", W=None, b=None, borrow=True):
 
         if W!=None: self.W = shared(value=W, borrow=borrow, name=layer_name+'_W')
-        elif activation in (relu,softplus): 
-            W_val = _asarray(rng.normal(loc=0, scale=0.01, 
+        else:
+            W_val = _asarray(rng.normal(loc=0, scale=2./sqrt(n_in), 
                 size=(n_in, n_out)), dtype=floatX)
-            self.W = shared(W_val, name=layer_name+"_W", borrow=borrow)    
-        else: 
-            # uniformly sampled W
-            low = -sqrt(6. / (n_in + n_out))
-            high = sqrt(6. / (n_in + n_out))
-            values = rng.uniform(low=low, high=high, size=(n_in, n_out))
-            W_val = _asarray(values, dtype=floatX)
-            if activation == sigmoid: W_val *= 4
-            self.W = shared(value=W_val, borrow=borrow, name=layer_name+'_W')
-            
+            self.W = shared(W_val, name=layer_name+"_W", borrow=borrow)        
 
         if b != None: self.b = shared(b, name=layer_name+"_b", borrow=borrow)
         else: 
-            print floatX
             # Initialize b with zeros
             self.b = shared(value=zeros((n_out,), dtype=config.floatX),
                             borrow=True, name=layer_name+"_b")
