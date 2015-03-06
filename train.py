@@ -13,6 +13,141 @@ import argparse
 from src.convnet3d.cnn3d import ConvNet3D
 from src.convnet3d.solver import Solver
 
+def train(net_file,trial_id,resume=None,seed=1234,dropout=[0.5],snapshot_rate=500,
+          validate_rate=500,num_iter=20000,loss_rate=1,reg=1e-3,mom_init=0.5,
+          mom_final=0.9,mom_step=0.1,lr_decay=0.95,lr=1e-5):
+    """Trains a network described in the file |net| with particular settings.
+    
+    Args:
+        net - text file describing network architecture
+        trial_id - unique integer identifying trial number which corresponds 
+                   to the parameter settings
+        resume - integer indicating iteration from which to resume training
+        ...
+        
+    Returns:
+        A tuple of best validation accuracy and the iteration when it occurred.
+    """
+    properties = {}
+    layers = []    
+    with open(net_file) as fp:
+        for line in fp:
+            if line == '\n':
+                continue
+            
+            prop, value = line.split(":")
+            if prop in ('video-shape','train','val','batch-size','name'):
+                properties[prop] = value.strip().rstrip()
+            elif prop in ('pool','conv','fc','softmax'):
+                layers.append((prop,value.rstrip()))
+
+    # Assert all necessary fields are present and valid
+    assert 'name' in properties
+    assert 'train' in properties
+    assert 'val' in properties
+    assert 'batch-size' in properties
+    try:
+        properties['batch-size'] = int(properties['batch-size'])
+    except:
+        print >> sys.stderr, "batch-size must be an integer"
+        return None, None
+    assert 'video-shape' in properties
+    try:
+        properties['video-shape'] = \
+            tuple(int(x) for x in properties['video-shape'] \
+                                  .strip('(').rstrip(')').split(','))
+    except:
+        print >> sys.stderr, "video-shape not in valid format"
+        return None, None
+
+    # Create directory to store results
+    savepath = os.path.join("results",properties['name']+"-%04d"%trial_id)
+    if os.path.isdir(savepath) and resume is None:
+        print "Attempted to overwrite %s with brand new training." % savepath
+        print "Training aborted. If you wish to proceed, please delete " \
+              "%s explicitly, then rerun command" % savepath
+        return None, None
+    if not os.path.isdir(savepath):
+        os.makedirs(savepath)
+    
+    # Create convnet
+    net = ConvNet3D(properties['name'],
+                   properties['video-shape'],
+                   properties['batch-size'],
+                   seed=seed)
+                   
+    # Add train / val databases
+    net.add_train_data(properties['train'])
+    net.add_val_data(properties['val'])
+
+    reg_multipliers = {}
+
+    # We will follow convention of naming layers based on how many convolutions
+    # deep in the architecture they are. For example, a pool layer coming after
+    # the 6th conv layer will be pool6, even if it isn't the 6th pooling layer.
+    conv_count = 0
+    fc_count = 0
+    for layer_type, value in layers:
+        if layer_type == "conv":
+            conv_count += 1
+            shape, num_filters, reg_mult = value.split()
+            shape = shape.strip("( )")
+            shape = tuple(int(x) for x in shape.split(','))
+            num_filters = int(num_filters)
+            name = "conv%d"%conv_count
+            net.add_conv_layer(name, shape, num_filters)
+            reg_multipliers[name+"_W"] = float(reg_mult.split('=')[1])
+        
+        if layer_type == "pool":
+            value = value.strip("( )")
+            shape = tuple(int(x) for x in value.split(','))
+            net.add_pool_layer("pool%d"%conv_count,shape)
+            
+        if layer_type == "fc":
+            fc_count += 1
+            num_units_str, reg_mult = value.split()
+            num_units = int(num_units_str)
+            p = dropout[min(fc_count,len(dropout))-1]
+            name = "fc%d"%fc_count
+            net.add_fc_layer(name,num_units, p)
+            reg_multipliers[name+"_W"] = float(reg_mult.split('=')[1])
+            
+        if layer_type == "softmax":
+            num_classes_str, reg_mult = value.split()
+            num_classes = int(num_classes_str)
+            net.add_softmax_layer("softmax",num_classes)
+            reg_multipliers["softmax_W"] = float(reg_mult.split('=')[1])
+        
+    snapshot_params = {
+        "dir": "snapshots",
+        "rate": snapshot_rate,
+        "resume": resume}
+    
+    opt_params = {
+        "method": "momentum",
+        "initial": mom_init,
+        "final": mom_final,
+        "step": mom_step, # per epoch
+        "lr_decay": lr_decay,
+        "lr_base": lr}
+        
+    reg_params = dict((param,mult*reg) for param,mult in reg_multipliers.items())
+
+    # Copy the network architecture description file to the results folder
+    shutil.copy(net_file,os.path.join(savepath,'architecture.txt'))    
+    print "about to solve"
+    solver = Solver(net,reg_params,opt_params)
+    print "created solver"
+    best_val_accuracy, best_val_iter = solver.train(
+                                         num_iter,
+                                         snapshot_params,
+                                         savepath,
+                                         validate_rate=validate_rate,
+                                         loss_rate=loss_rate)
+    "solved"
+    return best_val_accuracy, best_val_iter
+    
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("net",
@@ -53,135 +188,24 @@ def main():
                              "(including dropout parameter) if so desired")
 
     args = parser.parse_args()
-
-    properties = {}
-    layers = []    
-    with open(args.net) as fp:
-        for line in fp:
-            if line == '\n':
-                continue
-            
-            prop, value = line.split(":")
-            if prop in ('video-shape','train','val','batch-size','name'):
-                properties[prop] = value.strip().rstrip()
-            elif prop in ('pool','conv','fc','softmax'):
-                layers.append((prop,value.rstrip()))
-
-    # Assert all necessary fields are present and valid
-    assert 'name' in properties
-    assert 'train' in properties
-    assert 'val' in properties
-    assert 'batch-size' in properties
-    try:
-        properties['batch-size'] = int(properties['batch-size'])
-    except:
-        print >> sys.stderr, "batch-size must be an integer"
-        exit(1)
-    assert 'video-shape' in properties
-    try:
-        properties['video-shape'] = \
-            tuple(int(x) for x in properties['video-shape'] \
-                                  .strip('(').rstrip(')').split(','))
-    except:
-        print >> sys.stderr, "video-shape not in valid format"
-        exit(1)
-
-    # Create directory to store results
-    savepath = os.path.join("results",properties['name']+"-%04d"%args.trial_id)
-    if os.path.isdir(savepath) and args.resume is None:
-        print "Attempted to overwrite %s with brand new training." % savepath
-        print "Training aborted. If you wish to proceed, please delete " \
-              "%s explicitly, then rerun command" % savepath
-        exit(1)
-    if not os.path.isdir(savepath):
-        os.makedirs(savepath)
     
-    # Create convnet
-    net = ConvNet3D(properties['name'],
-                   properties['video-shape'],
-                   properties['batch-size'],
-                   seed=args.seed)
-                   
-    # Add train / val databases
-    print properties['train'], properties['val']
-    net.add_train_data(properties['train'])
-    net.add_val_data(properties['val'])
-
-    reg_multipliers = {}
-
-    # We will follow convention of naming layers based on how many convolutions
-    # deep in the architecture they are. For example, a pool layer coming after
-    # the 6th conv layer will be pool6, even if it isn't the 6th pooling layer.
-    conv_count = 0
-    fc_count = 0
-    for layer_type, value in layers:
-        if layer_type == "conv":
-            conv_count += 1
-            shape, num_filters, reg_mult = value.split()
-            shape = shape.strip(" (").rstrip(')')
-            shape = tuple(int(x) for x in shape.split(','))
-            num_filters = int(num_filters)
-            name = "conv%d"%conv_count
-            net.add_conv_layer(name, shape, num_filters)
-            reg_multipliers[name+"_W"] = float(reg_mult.split('=')[1])
-        
-        if layer_type == "pool":
-            value = value.strip(" (").rstrip(')')
-            shape = tuple(int(x) for x in value.split(','))
-            net.add_pool_layer("pool%d"%conv_count,shape)
-            
-        if layer_type == "fc":
-            fc_count += 1
-            num_units_str, reg_mult = value.split()
-            num_units = int(num_units_str)
-            p = args.dropout[min(fc_count,len(args.dropout))-1]
-            name = "fc%d"%fc_count
-            net.add_fc_layer(name,num_units, p)
-            reg_multipliers[name+"_W"] = float(reg_mult.split('=')[1])
-            
-        if layer_type == "softmax":
-            num_classes_str, reg_mult = value.split()
-            num_classes = int(num_classes_str)
-            net.add_softmax_layer("softmax",num_classes)
-            reg_multipliers["softmax_W"] = float(reg_mult.split('=')[1])
-        
-    snapshot_params = {
-        "dir": "snapshots",
-        "rate": args.snapshot_rate,
-        "resume": args.resume}
+    kwargs = vars(args).copy()
+    del kwargs['net']
+    del kwargs['trial_id']
     
-    opt_params = {
-        "method": "momentum",
-        "initial": args.mom_init,
-        "final": args.mom_final,
-        "step": args.mom_step, # per epoch
-        "lr_decay": args.lr_decay,
-        "lr_base": args.lr}
-        
-    reg_params = dict((param,mult*args.reg) for param,mult in reg_multipliers.items())
-
-    # Copy the network architecture description file to the results folder
-    shutil.copy(args.net,os.path.join(savepath,'architecture.txt'))    
-    
-    solver = Solver(net,reg_params,opt_params)
-    best_val_accuracy, best_val_iter = solver.train(
-                                         args.num_iter,
-                                         snapshot_params,
-                                         savepath,
-                                         validate_rate=args.validate_rate,
-                                         loss_rate=args.loss_rate)
-
-    log_filename = 'results/'+properties['name']+'-trials.txt'
-    if not os.path.exists(log_filename):
-        with open(log_filename,'w') as fp:
-            print >> fp, '\t'.join(['trial-id','best-val-acc',
-                                    'best-val-iter','settings'])
-
-    with open(log_filename,'a') as fp:
-        print >> fp, "\t".join(["%04d" % args.trial_id,
-                                "%0.5f" % best_val_accuracy,
-                                str(best_val_iter),
-                                str(vars(args))])
+    best_val_acc, best_val_iter = train(args.net,args.trial_id,**kwargs)
+    print best_val_acc, best_val_iter
+#    log_filename = 'results/'+properties['name']+'-trials.txt'
+#    if not os.path.exists(log_filename):
+#        with open(log_filename,'w') as fp:
+#            print >> fp, '\t'.join(['trial-id','best-val-acc',
+#                                    'best-val-iter','settings'])
+#
+#    with open(log_filename,'a') as fp:
+#        print >> fp, "\t".join(["%04d" % args.trial_id,
+#                                "%0.5f" % best_val_accuracy,
+#                                str(best_val_iter),
+#                                str(vars(args))])
 
 
 if __name__ == "__main__":

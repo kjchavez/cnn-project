@@ -61,7 +61,7 @@ class LogRegr(object):
 
     def errors(self, y):
         """ Errors over the total number of examples (in the minibatch) """
-        return T.mean(T.neq(self.y_pred, y))
+        return T.cast(T.mean(T.neq(self.y_pred, y)),theano.config.floatX)
 
 
 class HiddenLayer(object):
@@ -97,7 +97,7 @@ def _dropout_from_layer(rng, layer, p):
     mask = srng.binomial(n=1, p=1-p, size=layer.shape)
     # The cast is important because
     # int * float32 = float64 which pulls things off the gpu
-    output = layer * T.cast(mask, theano.config.floatX) / (1. - p)
+    output = layer * T.cast(mask, theano.config.floatX) * T.cast(1./(1. - p),theano.config.floatX)
     return output
 
 class DropoutHiddenLayer(HiddenLayer):

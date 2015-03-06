@@ -83,8 +83,8 @@ class Solver:
             if param.name in reg_params:
                 print "Adding regularization to", param.name
                 reg, reg_grad, updates, info = l2_regularizer(param) 
-                loss = loss + reg_params[param.name] *reg
-                gparams.append(gparam + reg_params[param.name]*reg_grad)
+                loss = loss + T.cast(reg_params[param.name] *reg,theano.config.floatX)
+                gparams.append(gparam + T.cast(reg_params[param.name],theano.config.floatX)*reg_grad)
             else:
                 gparams.append(gparam)
 
@@ -139,6 +139,7 @@ class Solver:
         # updates the model parameters.
         train_X = conv_net.train_data.X
         train_y = conv_net.train_data.y
+        print updates
         self.train_model = \
             theano.function(
                 inputs = [index], 
