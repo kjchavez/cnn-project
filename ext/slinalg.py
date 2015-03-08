@@ -9,6 +9,7 @@ from theano.gof import Op, Apply
 from theano.tensor import as_tensor_variable, dot, DimShuffle, Dot
 from theano.tensor.blas import Dot22
 from theano import tensor
+from theano.sparse.basic import as_sparse_variable
 import theano.tensor
 from theano.tensor.opt import (register_stabilize,
         register_specialize, register_canonicalize)
@@ -193,6 +194,50 @@ class Solve(Op):
             return [(rows, cols)]
 
 solve = Solve()  # general solve
+
+class SparseSolve(Op):
+    """Solve a sparse system of linear equations"""
+
+    __props__ = ('overwrite_A', 'overwrite_b')
+
+    def __init__(self,
+                 overwrite_A=False,
+                 overwrite_b=False):
+
+        self.overwrite_A = overwrite_A
+        self.overwrite_b = overwrite_b
+
+    def __repr__(self):
+        return 'SparseSolve{%s}' % str(self._props())
+
+    def make_node(self, A, b):
+        assert imported_scipy, (
+            "Scipy not available. Scipy is needed for the Solve op")
+        A = as_sparse_variable(A)
+        b = as_tensor_variable(b)
+        assert A.ndim == 2
+        assert b.ndim in [1, 2]
+        otype = tensor.tensor(
+                broadcastable=b.broadcastable,
+                dtype=(A * b).dtype)
+        return Apply(self, [A, b], [otype])
+
+    def perform(self, node, inputs, output_storage):
+        A, b = inputs
+        rval = scipy.sparse.linalg.spsolve(A, b)
+        output_storage[0][0] = rval
+        
+    # computes shape of x where x = inv(A) * b
+    def infer_shape(self, node, shapes):
+        Ashape, Bshape = shapes
+        rows = Ashape[1]
+        if len(Bshape) == 1:  # b is a Vector
+            return [(rows,)]
+        else:
+            cols = Bshape[1]  # b is a Matrix
+            return [(rows, cols)]
+            
+spsolve = SparseSolve()
 
 #TODO : SolveTriangular
 

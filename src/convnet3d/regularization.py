@@ -5,10 +5,15 @@ Created on Sat Feb 28 14:02:45 2015
 
 @author: Kevin Chavez
 """
+import time
 import theano
+import theano.sparse
 import theano.tensor as T
 import theano.tensor.slinalg
+import numpy as np
 from numpy.random import RandomState
+import scipy.sparse
+#from src.tests.optflow_reg import display
 
 def flat_join(*args):
     # Reduce all inputs to vector 
@@ -21,8 +26,284 @@ def flat_join(*args):
             join_args.append( T.shape_padleft(arg))
             # join them into a vector
     return T.join(0, *join_args)
-        
 
+def brightness_constancy(kernel,Vx,Vy,bgr=True):
+    # Collapse channels    
+    if kernel.ndim == 5:
+        if bgr:
+            W = 0.2989*kernel[:,2] + 0.5870*kernel[:,1] + 0.1140*kernel[:,0]
+        else:
+            W = np.mean(kernel,axis=1)
+
+    N, TT, HH, WW = W.shape
+    
+    Dx = np.diag([1.]*(WW-1),1) + np.diag([-1.]*(WW-1),-1)
+    Dy = np.diag([1.]*(HH-1),1) + np.diag([-1.]*(HH-1),-1)
+    
+    B = np.tensordot(W, Dx.T,axes=[(3,),(0,)])*Vx + \
+        np.tensordot(Dy,W, axes=[(1,),(2,)]).transpose(1,2,0,3) * Vy + \
+        np.concatenate((W[:,1:] - W[:,:-1],-W[:,[TT-1]]),axis=1)
+
+    return B
+    
+def smoothness(Vx,Vy):
+    N, TT, HH, WW = Vx.shape
+    Dx = np.diag([1.]*(WW-1),1) + np.diag([-1.]*(WW-1),-1)
+    Dy = np.diag([1.]*(HH-1),1) + np.diag([-1.]*(HH-1),-1)
+    Dt = np.diag([1.]*(TT-1),1) + np.diag([-1.]*(TT),0)
+    
+    Vxdx = np.tensordot(Vx,Dx.T,axes=[(3,),(0,)]) #Vx[:,:,:,2:] - Vx[:,:,:,0:-2]
+    Vxdy = np.tensordot(Dy,Vx, axes=[(1,),(2,)]) #Vx[:,:,2:,:] - Vx[:,:,0:-2,:]
+    Vxdt = np.tensordot(Dt,Vx, axes=[(1,),(1,)]) #Vx[:,2:,:,:] - Vx[:,0:-2,:,:]
+
+    Vydx = np.tensordot(Vy,Dx.T,axes=[(3,),(0,)]) #Vx[:,:,:,2:] - Vx[:,:,:,0:-2]
+    Vydy = np.tensordot(Dy,Vy, axes=[(1,),(2,)]) #Vx[:,:,2:,:] - Vx[:,:,0:-2,:]
+    Vydt = np.tensordot(Dt,Vy, axes=[(1,),(1,)])
+    
+    penalty = np.sum(Vxdx*Vxdx) + np.sum(Vxdy*Vxdy) + \
+              np.sum(Vxdt*Vxdt) + np.sum(Vydx*Vydx) + \
+              np.sum(Vydy*Vydy) + np.sum(Vydt*Vydt)
+              
+    return 0.5*penalty
+
+def cost(filt,Vx,Vy,gamma):
+    B = brightness_constancy(filt,Vx,Vy) 
+    return (0.5*np.sum(B*B) + gamma * smoothness(Vx,Vy)) / filt.size * filt.shape[1]
+    
+def grad(filt,Vx,Vy,gamma,bgr=True):
+    N, TT, HH, WW = Vx.shape
+    Dx = np.diag([1.]*(WW-1),1) + np.diag([-1.]*(WW-1),-1)
+    Dy = np.diag([1.]*(HH-1),1) + np.diag([-1.]*(HH-1),-1)
+    Dt = np.diag([1.]*(TT-1),1) + np.diag([-1.]*(TT),0)    
+    DxDx = Dx.T.dot(Dx)
+    DyDy = Dy.T.dot(Dy)
+    DtDt = Dt.T.dot(Dt)
+
+    if bgr:
+        W = 0.2989*filt[:,2] + 0.5870*filt[:,1] + 0.1140*filt[:,0]
+    else:
+        W = np.mean(filt,axis=1)    
+     
+    B = brightness_constancy(filt,Vx,Vy) 
+    dVx = B * np.tensordot(W, Dx.T,axes=[(3,),(0,)]) + \
+            gamma*(np.tensordot(Vx, DxDx,axes=[(3,),(0,)]) + \
+                   np.tensordot(DyDy,Vx, axes=[(1,),(2,)]).transpose(1,2,0,3) + \
+                   np.tensordot(Vx,DtDt,axes=[(1,),(0,)]).transpose(0,3,1,2) )
+                   # 2Vxt - Vxt+1 - Vxt-1
+    dVy = B* np.tensordot(Dy,W, axes=[(1,),(2,)]).transpose(1,2,0,3) + \
+            gamma*(np.tensordot(Vy, DxDx,axes=[(3,),(0,)]) + \
+                   np.tensordot(DyDy,Vy, axes=[(1,),(2,)]).transpose(1,2,0,3) +\
+                   np.tensordot(Vy,DtDt,axes=[(1,),(0,)]).transpose(0,3,1,2))
+                   
+    return dVx / Vx.size, dVy / Vy.size
+    
+def optflow_regularizer_fast(kernel,kernel_shape,bgr=True,gamma=0.16):
+    N, C, TT, HH, WW = kernel_shape
+    # Random initialization. Only matters to make sure problem is well-
+    # conditioned.
+    #Vxt = np.zeros((HH,WW)) # for all t
+    #Vyt = np.zeros((HH,WW)) # for all t
+    
+    # Flatten kernel along channels
+    if bgr:
+        kernel = 0.2989*kernel[:,2] + 0.5870*kernel[:,1] + 0.1140*kernel[:,0]
+    else:
+        kernel = np.mean(kernel,axis=1)
+    
+    # Derivative approximation matrices
+    Dx = np.diag([1.]*(WW-1),1) + np.diag([-1.]*(WW-1),-1)
+    DxDx = Dx.T.dot(Dx)
+    Dy = np.diag([1.]*(HH-1),1) + np.diag([-1.]*(HH-1),-1)
+    DyDy = Dy.T.dot(Dy)
+        
+    # Derivatives of kernel with respect to x, y, and t
+    Wx = np.tensordot(kernel, Dx.T,axes=[(3,),(0,)])
+    Wy = np.tensordot(Dy,kernel, axes=[(1,),(2,)]).transpose(1,2,0,3)
+    Wt = np.concatenate((kernel[:,1:] - kernel[:,:-1],-kernel[:,[TT-1]]),axis=1)
+   
+    # Create gradients assuming initial point is Vx = Vy = 0
+    gVx = Wt*Wx
+    gVy = Wt*Wy
+    
+    Hxx_diag_blocks = []
+    Hyy_diag_blocks = []
+    Hxy_diag_blocks = []
+    upper_band = np.diag([-gamma]*HH*WW*(TT-1),k=HH*WW)
+    lower_band = np.diag([-gamma]*HH*WW*(TT-1),k=-HH*WW)
+    for n in range(N):
+        Hnxx_diag_blocks = []
+        Hnyy_diag_blocks = []
+        for t in range(TT):
+            # Compute sparse Hessian
+            Hxx = np.zeros((HH*WW,HH*WW))
+            Hyy = np.zeros((HH*WW,HH*WW))
+            Hxy = np.zeros((HH*WW,HH*WW))
+            
+            # Hint: Use np.ravel_multi_index
+            #start_idx = np.ravel_multi_index((n,c,t,0,0),kernel.shape)
+            np.fill_diagonal(Hxx,np.ravel(Wx[n,t]**2) + gamma*(2.0 if t > 0 else 1.0))
+            np.fill_diagonal(Hyy,np.ravel(Wy[n,t]**2) + gamma*(2.0 if t > 0 else 1.0))
+                
+            np.fill_diagonal(Hxy,np.ravel(Wy[n,t]*Wx[n,t]))
+            Hnxx_diag_blocks.append(Hxx)
+            Hnyy_diag_blocks.append(Hyy)
+            #Hxy_diag_blocks.append(Hxy)
+            
+        Hnxx = scipy.linalg.block_diag(*Hnxx_diag_blocks)
+        Hnyy = scipy.linalg.block_diag(*Hnyy_diag_blocks)
+        Hnxy = np.diag(np.ravel(Wy[n]*Wx[n]))
+
+        for j,ell in zip(*np.nonzero(DxDx)):
+            for i in xrange(HH):
+                idx1 = [i*HH + ell + t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,ell),(HH,WW))                        
+                idx2 = [i*HH + j + t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,j),(HH,WW))
+                Hnxx[idx1, idx2] += gamma*DxDx[j,ell]
+                Hnyy[idx1, idx2] += gamma*DxDx[j,ell]
+                
+        for k,i in zip(*np.nonzero(DyDy)):
+            for j in xrange(WW):
+                idx1 = [k*HH + j + t*HH*WW for t in range(TT)] #np.ravel_multi_index((k,j),(HH,WW))                        
+                idx2 = [i*HH + j +t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,j),(HH,WW))
+                Hnxx[idx1, idx2] += gamma*DyDy[k,i]
+                Hnyy[idx1, idx2] += gamma*DyDy[k,i] 
+ 
+    # Note: There are also two diagonal bands of -1's for the time coupling 
+        # between frames.
+        Hnxx += upper_band
+        Hnxx += lower_band
+        Hnyy += upper_band
+        Hnyy += lower_band
+        
+        Hxx_diag_blocks.append(Hnxx)
+        Hyy_diag_blocks.append(Hnyy)
+        Hxy_diag_blocks.append(Hnxy)
+        
+                
+    # Construct full hessian
+    hess_xx = scipy.sparse.block_diag(Hxx_diag_blocks)
+    hess_yy = scipy.sparse.block_diag(Hyy_diag_blocks)
+    hess_xy = scipy.sparse.block_diag(Hxy_diag_blocks)
+    hess = scipy.sparse.bmat([[hess_xx, hess_xy],[hess_xy,hess_yy]])
+
+    hess = hess.tocsr()
+    g = np.hstack([gVx.ravel(),gVy.ravel()])
+    print g.dtype
+    print hess.dtype
+    tic = time.time()
+    x_star = -scipy.sparse.linalg.spsolve(hess,g)
+    toc = time.time()
+    print "Solving sparse matrix equation took %0.6f seconds" % (toc - tic)
+    Vx_star = x_star[0:kernel.size].reshape(kernel.shape)
+    Vy_star = x_star[kernel.size:].reshape(kernel.shape)
+    return Vx_star, Vy_star    
+                   
+# Manual Hessian version
+def optflow_regularizer_slow(kernel,kernel_shape,bgr=True,gamma=0.16):
+    N, C, TT, HH, WW = kernel_shape
+    # Random initialization. Only matters to make sure problem is well-
+    # conditioned.
+    #Vxt = np.zeros((HH,WW)) # for all t
+    #Vyt = np.zeros((HH,WW)) # for all t
+    
+    # Flatten kernel along channels
+    if bgr:
+        kernel = 0.2989*kernel[:,2] + 0.5870*kernel[:,1] + 0.1140*kernel[:,0]
+    else:
+        kernel = np.mean(kernel,axis=1)
+    
+    # Derivative approximation matrices
+    Dx = np.diag([1.]*(WW-1),1) + np.diag([-1.]*(WW-1),-1)
+    DxDx = Dx.T.dot(Dx)
+    Dy = np.diag([1.]*(HH-1),1) + np.diag([-1.]*(HH-1),-1)
+    DyDy = Dy.T.dot(Dy)
+    
+    gVx = np.empty_like(kernel)
+    gVy = np.empty_like(kernel)
+    
+    Hxx_diag_blocks = []
+    Hyy_diag_blocks = []
+    Hxy_diag_blocks = []
+    for n in range(N):
+        Hnxx_diag_blocks = []
+        Hnyy_diag_blocks = []
+        for t in range(TT):
+            Wt = kernel[n,t]
+            Wt1 = kernel[n,t+1] if t < TT-1 else np.zeros_like(Wt)
+            # Create gradients
+#                B = (Wt.dot(Dx.T) * Vxt + Dy.dot(Wt) * Vyt + Wt1 - Wt)
+#                dVxt = B * Wt.dot(Dx.T) + gamma*(Vxt.dot(DxDx) + DyDy.dot(Vxt)
+#                                                 + 0) #
+#                dVyt = B * Dy.dot(Wt) + gamma*(Vyt.dot(DxDx) + DyDy.dot(Vyt)
+#                                                + 0)
+            # Create gradients assuming initial point is Vx = Vy = 0
+            B = Wt1 - Wt
+            dVxt = B * Wt.dot(Dx.T)
+            dVyt = B * Dy.dot(Wt)
+            
+            gVx[n,t] = dVxt
+            gVy[n,t] = dVyt
+            
+            # Compute sparse Hessian
+            Hxx = scipy.sparse.lil_matrix((HH*WW,HH*WW))
+            Hyy = scipy.sparse.lil_matrix((HH*WW,HH*WW))
+            Hxy = scipy.sparse.lil_matrix((HH*WW,HH*WW))
+            
+            # Hint: Use np.ravel_multi_index
+            #start_idx = np.ravel_multi_index((n,c,t,0,0),kernel.shape)
+            Hxx.setdiag(np.ravel(Wt.dot(Dx.T)**2) + gamma*(2.0 if t > 0 else 1.0))
+            Hyy.setdiag(np.ravel(Dy.dot(Wt)**2) + gamma*(2.0 if t > 0 else 1.0))
+            
+            for j,ell in zip(*np.nonzero(DxDx)):
+                for i in xrange(HH):
+                    idx1 = np.ravel_multi_index((i,ell),(HH,WW))                        
+                    idx2 = np.ravel_multi_index((i,j),(HH,WW))
+                    Hxx[idx1, idx2] += gamma*DxDx[j,ell]
+                    Hyy[idx1, idx2] += gamma*DxDx[j,ell]
+                    
+            for k,i in zip(*np.nonzero(DyDy)):
+                for j in xrange(WW):
+                    idx1 = np.ravel_multi_index((k,j),(HH,WW))                        
+                    idx2 = np.ravel_multi_index((i,j),(HH,WW))
+                    Hxx[idx1, idx2] += gamma*DyDy[k,i]
+                    Hyy[idx1, idx2] += gamma*DyDy[k,i]
+                    
+            Hxy.setdiag(np.ravel(Dy.dot(Wt)*Wt.dot(Dx.T)))
+            Hnxx_diag_blocks.append(Hxx)
+            Hnyy_diag_blocks.append(Hyy)
+            Hxy_diag_blocks.append(Hxy)
+            
+        Hnxx = scipy.sparse.block_diag(Hnxx_diag_blocks,format='lil')
+        Hnyy = scipy.sparse.block_diag(Hnyy_diag_blocks,format='lil')
+ 
+        # Note: There are also two diagonal bands of -1's for the time coupling 
+        # between frames.
+        Hnxx.setdiag([-gamma]*HH*WW*(TT-1),k=HH*WW)
+        Hnxx.setdiag([-gamma]*HH*WW*(TT-1),k=-HH*WW)
+        Hnyy.setdiag([-gamma]*HH*WW*(TT-1),k=HH*WW)
+        Hnyy.setdiag([-gamma]*HH*WW*(TT-1),k=-HH*WW)
+        
+        Hxx_diag_blocks.append(Hnxx)
+        Hyy_diag_blocks.append(Hnyy)
+        
+                
+    # Construct full hessian
+    hess_xx = scipy.sparse.block_diag(Hxx_diag_blocks)
+    hess_yy = scipy.sparse.block_diag(Hyy_diag_blocks)
+    hess_xy = scipy.sparse.block_diag(Hxy_diag_blocks)
+    hess = scipy.sparse.bmat([[hess_xx, hess_xy],[hess_xy,hess_yy]])
+
+    hess = hess.tocsr()
+    g = np.hstack([gVx.ravel(),gVy.ravel()])
+    print g.dtype
+    print hess.dtype
+    tic = time.time()
+    x_star = -scipy.sparse.linalg.spsolve(hess,g)
+    toc = time.time()
+    print "Solving sparse matrix equation took %0.6f seconds" % (toc - tic)
+    Vx_star = x_star[0:kernel.size].reshape(kernel.shape)
+    Vy_star = x_star[kernel.size:].reshape(kernel.shape)
+    return Vx_star, Vy_star
+                        
 def optical_flow_regularizer(kernel,kernel_shape,
                              rng=RandomState(1234),bgr=True,gamma=0.16,
                              smoothness='L2'):
@@ -85,21 +366,12 @@ def optical_flow_regularizer(kernel,kernel_shape,
     Vydy = Vy[:,:,1:,:] - Vy[:,:,0:-1,:]
     Vydt = Vy[:,1:,:,:] - Vy[:,0:-1,:,:]
     
-    if smoothness == 'L1':
-        smoothness_penalty =  T.sum(abs(Vxdx)) + \
-                             T.sum(abs(Vxdy)) + \
-                             T.sum(abs(Vxdt)) + \
-                             T.sum(abs(Vydx)) + \
-                             T.sum(abs(Vydy)) + \
-                             T.sum(abs(Vydt))
-        
-    else:
-        smoothness_penalty =  T.sum(Vxdx*Vxdx) + \
-                             T.sum(Vxdy*Vxdy) + \
-                             T.sum(Vxdt*Vxdt) + \
-                             T.sum(Vydx*Vydx) + \
-                             T.sum(Vydy*Vydy) + \
-                             T.sum(Vydt*Vydt)
+    smoothness_penalty =  T.sum(Vxdx*Vxdx) + \
+                         T.sum(Vxdy*Vxdy) + \
+                         T.sum(Vxdt*Vxdt) + \
+                         T.sum(Vydx*Vydx) + \
+                         T.sum(Vydy*Vydy) + \
+                         T.sum(Vydt*Vydt)
 
     cost = 0.5*(bc_penalty + gamma*smoothness_penalty)
     
@@ -121,12 +393,15 @@ def optical_flow_regularizer(kernel,kernel_shape,
     
     # Sparse solve would be fantastic. In the mean-time Cholesky factorization
     # reduces running time by a factor of about 6
-    L = T.slinalg.cholesky(H)
-    lower_solve = T.slinalg.Solve(A_structure="lower_triangular")
-    upper_solve = T.slinalg.Solve(A_structure="upper_triangular")
-    b = lower_solve(L,g_all)
-    # Can solve for optimum in a single newton step
-    x_star = flat_join(Vx,Vy) - upper_solve(T.transpose(L),b)
+#    L = T.slinalg.cholesky(H)
+#    lower_solve = T.slinalg.Solve(A_structure="lower_triangular")
+#    upper_solve = T.slinalg.Solve(A_structure="upper_triangular")
+#    b = lower_solve(L,g_all)
+#    # Can solve for optimum in a single newton step
+#    x_star = flat_join(Vx,Vy) - upper_solve(T.transpose(L),b)
+    Hsparse = theano.sparse.csr_from_dense(H)
+        
+    x_star = flat_join(Vx,Vy) - T.slinalg.spsolve(Hsparse,g_all)
                                     
     Vx_star = x_star[0:Vx.size].reshape(Vx.shape)
     Vy_star = x_star[Vx.size:].reshape(Vy.shape)
@@ -147,20 +422,12 @@ def optical_flow_regularizer(kernel,kernel_shape,
     Vydy_star = Vy_star[:,:,1:,:] - Vy_star[:,:,0:-1,:]
     Vydt_star = Vy_star[:,1:,:,:] - Vy_star[:,0:-1,:,:]
     
-    if smoothness == 'L1':
-        opt_smoothness_penalty = T.sum(abs(Vxdx_star)) + \
-                                 T.sum(abs(Vxdy_star)) + \
-                                 T.sum(abs(Vxdt_star)) + \
-                                 T.sum(abs(Vydx_star)) + \
-                                 T.sum(abs(Vydy_star)) + \
-                                 T.sum(abs(Vydt_star))
-    else:
-        opt_smoothness_penalty = T.sum(Vxdx_star*Vxdx_star) + \
-                                 T.sum(Vxdy_star*Vxdy_star) + \
-                                 T.sum(Vxdt_star*Vxdt_star) + \
-                                 T.sum(Vydx_star*Vydx_star) + \
-                                 T.sum(Vydy_star*Vydy_star) + \
-                                 T.sum(Vydt_star*Vydt_star)
+    opt_smoothness_penalty = T.sum(Vxdx_star*Vxdx_star) + \
+                             T.sum(Vxdy_star*Vxdy_star) + \
+                             T.sum(Vxdt_star*Vxdt_star) + \
+                             T.sum(Vydx_star*Vydx_star) + \
+                             T.sum(Vydy_star*Vydy_star) + \
+                             T.sum(Vydt_star*Vydt_star)
     
     reg_loss = 0.5*(opt_bc_penalty + gamma*opt_smoothness_penalty)
         
@@ -178,7 +445,8 @@ def optical_flow_regularizer(kernel,kernel_shape,
     # highly doubt it
     #g_kernel2 = T.grad(reg_loss,kernel,consider_constant=[Vx_star,Vy_star])
     updates = [(Vx, Vx_star), (Vy, Vy_star)]
-    return reg_loss, g_kernel, updates, (Vx_star, Vy_star)
+    return reg_loss, g_kernel, (Vx_star, Vy_star)
+    
     
 def l2_regularizer(kernel):
     """ Creates theano expressions to evaluate regularization and its gradient.
@@ -186,3 +454,97 @@ def l2_regularizer(kernel):
     updates = []
     info = None
     return 0.5*T.sum(kernel*kernel), kernel, updates, info
+    
+def test():
+    import matplotlib.pyplot as plt
+    
+    N, C, TT, H, W = 32, 3, 5, 7, 7
+    gamma = 20.
+    rng = np.random.RandomState(seed=1)
+    noise = 20.*rng.randn(N,C,TT,H,W)
+    filt = noise #theano.shared(noise.astype(theano.config.floatX),borrow=True)
+    tic = time.time()
+    vx,vy = optflow_regularizer_slow(filt,filt.shape,gamma=gamma)
+    toc = time.time()
+    print "Full operation took %0.6f seconds" % (toc - tic)
+    opt_cost = cost(filt,vx,vy,gamma)
+    print "Optimal cost:", opt_cost
+    
+    # Check random jitter:
+    plt.close('all')
+    plt.figure()
+    #display(filt[0],vx[0],vy[0])
+    num_test = 5
+    for _ in xrange(num_test):
+        sx = 0.01*np.random.randn(*vx.shape)
+        sy = 0.01*np.random.randn(*vy.shape)
+        sx /= np.linalg.norm(sx)
+        sy /= np.linalg.norm(sy)
+        # Plot line along direction
+        alpha = np.linspace(-100,100,100)
+        costs = []
+        for a in alpha:
+            newcost = cost(filt,vx+a*sx,vy+a*sy,gamma)
+            costs.append(newcost)
+        
+        plt.plot(alpha,costs)
+        
+    plt.show()
+    #loss, grad, (Vx, Vy) = optical_flow_regularizer(filt,(N,C,TT,H,W),gamma=10.)
+
+    # Compile function     
+    return filt, vx, vy
+
+def test_gradient():
+    import matplotlib.pyplot as plt
+    import cProfile, pstats, StringIO
+    N, C, TT, H, W = 32, 3, 7, 9, 9
+    gamma = 2.
+    rng = np.random.RandomState(seed=5)
+    filt = 20.*rng.randn(N,C,TT,H,W)
+  
+    plt.close('all')  
+    # Randomly initialize Vx and Vy
+    Vx = np.random.randn(N,TT,H,W)
+    Vy = np.random.randn(N,TT,H,W)
+
+    # Do gradient descent. We know its slow, but it will be a sanity check for 
+    # expression for the gradient
+    costs = []
+    for i in range(0):
+        gVx, gVy = grad(filt,Vx,Vy,gamma)
+        Vx -= 1e-1*gVx
+        Vy -= 1e-1*gVy
+        new_cost = cost(filt,Vx,Vy,gamma)
+        norms = np.linalg.norm(gVx)/ gVx.size, np.linalg.norm(gVy) / gVy.size
+        if norms[0] < 1e-5 and norms[1] < 1e-5:
+            break
+        print norms
+        costs.append(new_cost)
+        
+    #plt.plot(costs)
+    #print costs[-1]
+
+    # Try with the Hessian
+#    tic = time.time()
+#    Vx_star, Vy_star = optflow_regularizer_slow(filt,filt.shape,gamma=gamma)
+#    toc = time.time()
+#    print "Slow ran in %0.6f seconds" % (toc - tic)
+    tic = time.time()
+    pr = cProfile.Profile()
+    pr.enable()
+    Vx_star2, Vy_star2 = optflow_regularizer_fast(filt,filt.shape,gamma=gamma)
+    pr.disable()
+    s = StringIO.StringIO()
+    sortby = 'cumulative'
+    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+    ps.print_stats()
+    print s.getvalue()
+    
+    toc = time.time()
+    print "Fast ran in %0.6f seconds" % (toc - tic)
+    #print "Difference in cost:", cost(filt,Vx_star,Vy_star,gamma) - cost(filt,Vx_star2,Vy_star2,gamma)
+            
+if __name__ == "__main__":
+    #filt, vx, vy = test()
+    test_gradient()
