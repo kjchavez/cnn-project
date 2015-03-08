@@ -128,8 +128,24 @@ def optflow_regularizer_fast(kernel,kernel_shape,bgr=True,gamma=0.16):
     Hxx_diag_blocks = []
     Hyy_diag_blocks = []
     Hxy_diag_blocks = []
+    
+    # Precompute some values
     upper_band = np.diag([-gamma]*HH*WW*(TT-1),k=HH*WW)
     lower_band = np.diag([-gamma]*HH*WW*(TT-1),k=-HH*WW)
+
+    gamma_band = np.zeros((TT*HH*WW,TT*HH*WW))
+    for j,ell in zip(*np.nonzero(DxDx)):
+        for i in xrange(HH):
+            idx1 = [i*HH + ell + t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,ell),(HH,WW))                        
+            idx2 = [i*HH + j + t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,j),(HH,WW))
+            gamma_band[idx1, idx2] += gamma*DxDx[j,ell]
+            
+    for k,i in zip(*np.nonzero(DyDy)):
+        for j in xrange(WW):
+            idx1 = [k*HH + j + t*HH*WW for t in range(TT)] #np.ravel_multi_index((k,j),(HH,WW))                        
+            idx2 = [i*HH + j +t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,j),(HH,WW))
+            gamma_band[idx1, idx2] += gamma*DyDy[k,i]
+
     for n in range(N):
         Hnxx_diag_blocks = []
         Hnyy_diag_blocks = []
@@ -149,23 +165,23 @@ def optflow_regularizer_fast(kernel,kernel_shape,bgr=True,gamma=0.16):
             Hnyy_diag_blocks.append(Hyy)
             #Hxy_diag_blocks.append(Hxy)
             
-        Hnxx = scipy.linalg.block_diag(*Hnxx_diag_blocks)
-        Hnyy = scipy.linalg.block_diag(*Hnyy_diag_blocks)
+        Hnxx = scipy.linalg.block_diag(*Hnxx_diag_blocks) + gamma_band
+        Hnyy = scipy.linalg.block_diag(*Hnyy_diag_blocks) + gamma_band
         Hnxy = np.diag(np.ravel(Wy[n]*Wx[n]))
 
-        for j,ell in zip(*np.nonzero(DxDx)):
-            for i in xrange(HH):
-                idx1 = [i*HH + ell + t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,ell),(HH,WW))                        
-                idx2 = [i*HH + j + t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,j),(HH,WW))
-                Hnxx[idx1, idx2] += gamma*DxDx[j,ell]
-                Hnyy[idx1, idx2] += gamma*DxDx[j,ell]
-                
-        for k,i in zip(*np.nonzero(DyDy)):
-            for j in xrange(WW):
-                idx1 = [k*HH + j + t*HH*WW for t in range(TT)] #np.ravel_multi_index((k,j),(HH,WW))                        
-                idx2 = [i*HH + j +t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,j),(HH,WW))
-                Hnxx[idx1, idx2] += gamma*DyDy[k,i]
-                Hnyy[idx1, idx2] += gamma*DyDy[k,i] 
+#        for j,ell in zip(*np.nonzero(DxDx)):
+#            for i in xrange(HH):
+#                idx1 = [i*HH + ell + t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,ell),(HH,WW))                        
+#                idx2 = [i*HH + j + t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,j),(HH,WW))
+#                Hnxx[idx1, idx2] += gamma*DxDx[j,ell]
+#                Hnyy[idx1, idx2] += gamma*DxDx[j,ell]
+#                
+#        for k,i in zip(*np.nonzero(DyDy)):
+#            for j in xrange(WW):
+#                idx1 = [k*HH + j + t*HH*WW for t in range(TT)] #np.ravel_multi_index((k,j),(HH,WW))                        
+#                idx2 = [i*HH + j +t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,j),(HH,WW))
+#                Hnxx[idx1, idx2] += gamma*DyDy[k,i]
+#                Hnyy[idx1, idx2] += gamma*DyDy[k,i] 
  
     # Note: There are also two diagonal bands of -1's for the time coupling 
         # between frames.
@@ -183,12 +199,11 @@ def optflow_regularizer_fast(kernel,kernel_shape,bgr=True,gamma=0.16):
     hess_xx = scipy.sparse.block_diag(Hxx_diag_blocks)
     hess_yy = scipy.sparse.block_diag(Hyy_diag_blocks)
     hess_xy = scipy.sparse.block_diag(Hxy_diag_blocks)
+
     hess = scipy.sparse.bmat([[hess_xx, hess_xy],[hess_xy,hess_yy]])
 
     hess = hess.tocsr()
     g = np.hstack([gVx.ravel(),gVy.ravel()])
-    print g.dtype
-    print hess.dtype
     tic = time.time()
     x_star = -scipy.sparse.linalg.spsolve(hess,g)
     toc = time.time()
@@ -498,7 +513,7 @@ def test():
 def test_gradient():
     import matplotlib.pyplot as plt
     import cProfile, pstats, StringIO
-    N, C, TT, H, W = 32, 3, 7, 9, 9
+    N, C, TT, H, W = 16, 3, 7, 9, 9
     gamma = 2.
     rng = np.random.RandomState(seed=5)
     filt = 20.*rng.randn(N,C,TT,H,W)
@@ -526,10 +541,10 @@ def test_gradient():
     #print costs[-1]
 
     # Try with the Hessian
-#    tic = time.time()
-#    Vx_star, Vy_star = optflow_regularizer_slow(filt,filt.shape,gamma=gamma)
-#    toc = time.time()
-#    print "Slow ran in %0.6f seconds" % (toc - tic)
+    tic = time.time()
+    Vx_star, Vy_star = optflow_regularizer_slow(filt,filt.shape,gamma=gamma)
+    toc = time.time()
+    print "Slow ran in %0.6f seconds" % (toc - tic)
     tic = time.time()
     pr = cProfile.Profile()
     pr.enable()
@@ -543,7 +558,7 @@ def test_gradient():
     
     toc = time.time()
     print "Fast ran in %0.6f seconds" % (toc - tic)
-    #print "Difference in cost:", cost(filt,Vx_star,Vy_star,gamma) - cost(filt,Vx_star2,Vy_star2,gamma)
+    print "Difference in cost:", cost(filt,Vx_star,Vy_star,gamma) - cost(filt,Vx_star2,Vy_star2,gamma)
             
 if __name__ == "__main__":
     #filt, vx, vy = test()
