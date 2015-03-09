@@ -6,23 +6,35 @@ Created on Fri Mar  6 00:12:39 2015
 
 @author: Kevin Chavez
 """
-import sys
+import argparse
 import numpy as np
 
-if len(sys.argv) > 1:
-    device_num = int(sys.argv[1])
+parser = argparse.ArgumentParser()
+parser.add_argument("net_file")
+parser.add_argument("logfilename")
+parser.add_argument("--optflow",action="store_true")
+parser.add_argument("--device",default=None,
+                    help="Specify a particular GPU or CPU. Note to specify a "
+                         "particular GPU, should invoke script with THEANO_FLAGS "
+                         "=device=cpu.")
+parser.add_argument("--trial-id",dest="trial_index",type=int,default=0,
+                    help="ID for first trial, rest will be sequential")
+parser.add_argument("--num-trials","-n",dest="num_trials",type=int,default=10,
+                    help="Number of trials of random search to run")
+                    
+args = parser.parse_args()
+
+if args.device:
     import theano.sandbox.cuda
-    theano.sandbox.cuda.use("gpu"+str(device_num))
-else:
-    device_num = 0
-    
+    theano.sandbox.cuda.use(args.device)
+
 import theano
 theano.config.warn_float64 = 'warn'
 from train import train
 
 # Default values
-net_file = 'models/videonet.txt'
-logfilename = 'results/videonet-hyperparameters.txt'
+net_file = args.net_file
+logfilename = args.logfilename
 kwargs = {
     'mom_init' : 0.5,
     'mom_final' : 0.9,
@@ -32,14 +44,15 @@ kwargs = {
     'validate_rate' : 500
 }
 
-#pool = multiprocessing.Pool(processes=MAX_PROCESSES)
 # Searching on parameters:
 # learning_rate, reg, dropout
-N = 10
-for n in xrange(N):
+for n in xrange(args.num_trials):
     kwargs['lr'] = np.float32(10**np.random.uniform(-8,-2))
     kwargs['reg'] = np.float32(10**np.random.uniform(-8,1))
     kwargs['dropout'] = [np.float32(np.random.choice([0.2,0.4,0.6,0.8]))]
+
+    if args.optflow:
+        kwargs['optflow_weight'] = np.float32(10**np.random.uniform(-2,0))
     
     print "Starting trial with lr %0.4e, reg %0.4e, dropout %0.2f..." % \
           (kwargs['lr'], kwargs['reg'], kwargs['dropout'][0])
@@ -51,7 +64,7 @@ for n in xrange(N):
                           best_val_acc, best_val_iter)
         print "Completed trial %d." % n
                     
-    val_acc, val_iter = train(net_file, n + N*device_num, **kwargs.copy())
+    val_acc, val_iter = train(net_file, n + args.trial_id, **kwargs.copy())
     if val_acc and val_iter:
         log_result(val_acc,val_iter)
     else:

@@ -565,7 +565,7 @@ def test_gradient():
     
 def test_regularization_step():
     import matplotlib.pyplot as plt
-    N, C, TT, H, W = 16, 3, 5, 7, 7
+    N, C, TT, H, W = 16, 3, 7, 7, 7
     gamma = 2.
     rng = np.random.RandomState(seed=5)
     
@@ -573,7 +573,7 @@ def test_regularization_step():
     costs = []
     norms = []
     lrs = np.logspace(-4,0,trials)
-    orig_filt = 20.*rng.randn(N,C,TT,H,W)
+    orig_filt = 1.*rng.randn(N,C,TT,H,W)
     
     plt.close('all')
     for t in xrange(trials):
@@ -609,6 +609,7 @@ def test_regularization_step():
 def characterize_hyperparameters():
     """ Explore the effects of the hyperparameter gamma and the weight given
     to this regularization term as part of a larger optimization problem."""
+    pass
     
     
 if __name__ == "__main__":
