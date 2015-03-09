@@ -1,4 +1,4 @@
-name: videonet
+name: bigfilt
 video-shape: (16,112,112)
 train: data/traindb112-112.lmdb
 val: data/valdb112-112.lmdb
