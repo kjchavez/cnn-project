@@ -144,7 +144,7 @@ class Solver:
         self.train_model = \
             theano.function(
                 inputs = [], #[index], 
-                outputs = loss,
+                outputs = [loss,conv_net.accuracy],
                 updates = updates,
                 givens = {
                     conv_net.X: train_X, #[index * batch_size:(index + 1) * batch_size],
@@ -192,6 +192,7 @@ class Solver:
         best_validation_acc = -1.0
         best_validation_iter = None
         loss_history_filename = os.path.join(savepath,"loss-history.txt")
+        train_acc_filename = os.path.join(savepath,"train-acc-history.txt")
         first_iteration = 1
         epoch_counter = 0
                         
@@ -224,6 +225,7 @@ class Solver:
         
         print "Starting training..."    
         loss_history = []
+        train_acc_history = []
         for iteration in xrange(first_iteration,first_iteration+n_iter):
             epoch_ended = self.conv_net.train_data.load_batch()
 
@@ -236,7 +238,7 @@ class Solver:
                                             W.get_value(borrow=True),
                                             W.get_value(borrow=True).shape)
                                             
-                minibatch_avg_cost = self.train_model()+optflow_weight*reg_loss
+                minibatch_avg_cost, train_acc = self.train_model()+optflow_weight*reg_loss
                 m = self.momentum.get_value()
                 optflow_momentum = \
                     m * optflow_momentum - (1. - m) * \
@@ -247,9 +249,10 @@ class Solver:
                             optflow_momentum.astype(theano.config.floatX))
             else:
                 # Train this batch
-                minibatch_avg_cost = self.train_model()
+                minibatch_avg_cost, train_acc = self.train_model()
                         
             loss_history.append(minibatch_avg_cost)
+            train_acc_history.append(train_acc)
                                                                 
             if iteration % loss_rate == 0:
                 print "minibatch loss:", minibatch_avg_cost
@@ -278,6 +281,12 @@ class Solver:
                     for loss in loss_history:
                         print >> fp, loss
                     loss_history = []
+
+                # Flush train accuracy history
+                with open(train_acc_filename,'a') as fp:
+                    for acc in train_acc_history:
+                        print >> fp, acc
+                    train_acc_history = []
                         
                 if (val_accuracy > best_validation_acc):
                     print "** Best score so far **"

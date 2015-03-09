@@ -57,11 +57,15 @@ class LogRegr(object):
 
     def negative_log_likelihood(self, y):
         """ Cost function: negative log likelihood """
-        return -T.mean(T.log(self.p_y_given_x)[T.arange(y.shape[0]), y])
+        return -T.mean(T.log(self.p_y_given_x)[T.arange(y.shape[0]), y],
+                       dtype=theano.config.floatX,
+                       acc_dtype=theano.config.floatX)
 
     def errors(self, y):
         """ Errors over the total number of examples (in the minibatch) """
-        return T.cast(T.mean(T.neq(self.y_pred, y)),theano.config.floatX)
+        return T.mean(T.neq(self.y_pred, y),
+                      dtype=theano.config.floatX,
+                      acc_dtype=theano.config.floatX)
 
 
 class HiddenLayer(object):
