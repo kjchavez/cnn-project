@@ -9,8 +9,6 @@ Created on Fri Mar  6 00:12:39 2015
 import sys
 import numpy as np
 
-MAX_PROCESSES = 2
-
 if len(sys.argv) > 1:
     device_num = int(sys.argv[1])
     import theano.sandbox.cuda
@@ -23,21 +21,21 @@ theano.config.warn_float64 = 'warn'
 from train import train
 
 # Default values
-net_file = 'models/tinynet.txt'
-logfilename = 'results/tinynet-hyperparameters.txt'
+net_file = 'models/videonet.txt'
+logfilename = 'results/videonet-hyperparameters.txt'
 kwargs = {
     'mom_init' : 0.5,
     'mom_final' : 0.9,
     'mom_step' : 0.1,
-    'num_iter' : 2,
-    'snapshot_rate' : 2,
-    'validate_rate' : 2
+    'num_iter' : 2000,
+    'snapshot_rate' : 500,
+    'validate_rate' : 500
 }
 
 #pool = multiprocessing.Pool(processes=MAX_PROCESSES)
 # Searching on parameters:
 # learning_rate, reg, dropout
-N = 5
+N = 10
 for n in xrange(N):
     kwargs['lr'] = np.float32(10**np.random.uniform(-8,-2))
     kwargs['reg'] = np.float32(10**np.random.uniform(-8,1))
