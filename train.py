@@ -15,7 +15,7 @@ from src.convnet3d.solver import Solver
 
 def train(net_file,trial_id,resume=None,seed=1234,dropout=[0.5],snapshot_rate=500,
           validate_rate=500,num_iter=20000,loss_rate=1,reg=1e-3,mom_init=0.5,
-          mom_final=0.9,mom_step=0.1,lr_decay=0.95,lr=1e-5):
+          mom_final=0.9,mom_step=0.1,lr_decay=0.95,lr=1e-5,optflow_weight=0):
     """Trains a network described in the file |net| with particular settings.
     
     Args:
@@ -142,7 +142,8 @@ def train(net_file,trial_id,resume=None,seed=1234,dropout=[0.5],snapshot_rate=50
                                          snapshot_params,
                                          savepath,
                                          validate_rate=validate_rate,
-                                         loss_rate=loss_rate)
+                                         loss_rate=loss_rate,
+                                         optflow_weight=optflow_weight)
     return best_val_accuracy, best_val_iter
     
 
