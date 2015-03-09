@@ -61,11 +61,12 @@ class Solver:
         val_y = conv_net.val_data.y
         batch_size = conv_net.batch_size
         self.validate_model = \
-            theano.function(inputs=[index],
+            theano.function(
+                inputs=[], #[index],
                 outputs = conv_net.accuracy,
                 givens={
-                    conv_net.X: val_X[index * batch_size:(index + 1) * batch_size],
-                    conv_net.y: val_y[index * batch_size:(index + 1) * batch_size]})
+                    conv_net.X: val_X, #[index * batch_size:(index + 1) * batch_size],
+                    conv_net.y: val_y}) #[index * batch_size:(index + 1) * batch_size]})
         #theano.printing.pydotprint(validate_model, outfile="test_file.png",
         #        var_with_name_simple=True)
         
@@ -125,7 +126,7 @@ class Solver:
             updates = OrderedDict()
             for gparam_mom, gparam in zip(momenta, gparams):
                 # change the update rule to match Hinton's dropout paper
-                updates[gparam_mom] = momentum * gparam_mom - (1. - momentum) \
+                updates[gparam_mom] = self.momentum * gparam_mom - (1. - self.momentum) \
                                       * self.learning_rate * gparam
                 
             for param, gparam_mom in zip(conv_net.parameters, momenta):
@@ -142,12 +143,12 @@ class Solver:
 
         self.train_model = \
             theano.function(
-                inputs = [index], 
+                inputs = [], #[index], 
                 outputs = loss,
                 updates = updates,
                 givens = {
-                    conv_net.X: train_X[index * batch_size:(index + 1) * batch_size],
-                    conv_net.y: train_y[index * batch_size:(index + 1) * batch_size]})
+                    conv_net.X: train_X, #[index * batch_size:(index + 1) * batch_size],
+                    conv_net.y: train_y }) #[index * batch_size:(index + 1) * batch_size]})
         #theano.printing.pydotprint(train_model, outfile="train_file.png",
         #        var_with_name_simple=True)
     
@@ -158,11 +159,12 @@ class Solver:
         accuracies = []
         while not epoch_ended:
             epoch_ended = self.conv_net.val_data.load_batch()
-            accuracies.append(self.validate_model(0))
+            accuracies.append(self.validate_model())
             
         return np.mean(accuracies)
             
-    def train(self,n_iter,snapshot_params,savepath,validate_rate=100,loss_rate=10):
+    def train(self,n_iter,snapshot_params,savepath,validate_rate=100,
+              loss_rate=10,optflow_weight=0):
         """ Train the solvers network for a number of iterations.
         
         Args:
@@ -215,13 +217,38 @@ class Solver:
 
 
         start_time = time.clock()
+
+        # Allocate space for optflow momentum if necessary
+        if optflow_weight > 0:
+            optflow_momentum = np.zeros_like(self.conv_net.parameters[0])
+        
         print "Starting training..."    
         loss_history = []
         for iteration in xrange(first_iteration,first_iteration+n_iter):
             epoch_ended = self.conv_net.train_data.load_batch()
 
-            # Train this batch
-            minibatch_avg_cost = self.train_model(0)
+            # Compute extra regularization step: Note this is under-developed.
+            # Ideally, it should be built into the Theano framework. Note, this
+            # temporary implementation requires that you use momentum updates
+            if optflow_weight > 0:
+                W = self.conv_net.parameters[0] # Apply to first layer
+                reg_loss, reg_grad, _ = optflow_regularizer_fast(
+                                            W.get_value(borrow=True),
+                                            W.get_value(borrow=True).shape)
+                                            
+                minibatch_avg_cost = self.train_model()+optflow_weight*reg_loss
+                m = self.momentum.get_value()
+                optflow_momentum = \
+                    m * optflow_momentum - (1. - m) * \
+                    self.learning_rate.get_value(borrow=True) * \
+                    optflow_weight * reg_grad
+                    
+                W.set_value(W.get_value(borrow=True) + 
+                            optflow_momentum.astype(theano.config.floatX))
+            else:
+                # Train this batch
+                minibatch_avg_cost = self.train_model()
+                        
             loss_history.append(minibatch_avg_cost)
                                                                 
             if iteration % loss_rate == 0:
@@ -289,10 +316,11 @@ def test():
         "lr_base": 1e-1}
 
     reg_params = {} #{'conv1_W': 0.1,'conv2_W': 0.2,'fc1_W': 0.3,'softmax_W':0.1}
-    snapshot_params = {"dir": "models/"+net.name,"rate":2}
+    snapshot_params = {"dir": "snapshots","rate":2}
     
     solver = Solver(net,reg_params,opt_params)
-    solver.train(60,snapshot_params,validate_rate=2,loss_rate=1)
+    solver.train(6,snapshot_params,"results/test",validate_rate=2,loss_rate=1,
+                 optflow_weight=0.5)
     
 if __name__ == "__main__":
     from src.convnet3d.cnn3d import get_test_net

@@ -15,6 +15,8 @@ from numpy.random import RandomState
 import scipy.sparse
 #from src.tests.optflow_reg import display
 
+BGR_WEIGHTS = [0.2989,0.5870,0.1140]
+
 def flat_join(*args):
     # Reduce all inputs to vector 
     #(https://groups.google.com/forum/#!msg/theano-users/A-RcItll8eA/z8eZyrTwX9wJ)
@@ -31,18 +33,18 @@ def brightness_constancy(kernel,Vx,Vy,bgr=True):
     # Collapse channels    
     if kernel.ndim == 5:
         if bgr:
-            W = 0.2989*kernel[:,2] + 0.5870*kernel[:,1] + 0.1140*kernel[:,0]
+            kernel = 0.2989*kernel[:,2] + 0.5870*kernel[:,1] + 0.1140*kernel[:,0]
         else:
-            W = np.mean(kernel,axis=1)
+            kernel = np.mean(kernel,axis=1)
 
-    N, TT, HH, WW = W.shape
+    N, TT, HH, WW = kernel.shape
     
     Dx = np.diag([1.]*(WW-1),1) + np.diag([-1.]*(WW-1),-1)
     Dy = np.diag([1.]*(HH-1),1) + np.diag([-1.]*(HH-1),-1)
     
-    B = np.tensordot(W, Dx.T,axes=[(3,),(0,)])*Vx + \
-        np.tensordot(Dy,W, axes=[(1,),(2,)]).transpose(1,2,0,3) * Vy + \
-        np.concatenate((W[:,1:] - W[:,:-1],-W[:,[TT-1]]),axis=1)
+    B = np.tensordot(kernel, Dx.T,axes=[(3,),(0,)])*Vx + \
+        np.tensordot(Dy,kernel, axes=[(1,),(2,)]).transpose(1,2,0,3) * Vy + \
+        np.concatenate((kernel[:,1:] - kernel[:,:-1],-kernel[:,[TT-1]]),axis=1)
 
     return B
     
@@ -169,21 +171,7 @@ def optflow_regularizer_fast(kernel,kernel_shape,bgr=True,gamma=0.16):
         Hnyy = scipy.linalg.block_diag(*Hnyy_diag_blocks) + gamma_band
         Hnxy = np.diag(np.ravel(Wy[n]*Wx[n]))
 
-#        for j,ell in zip(*np.nonzero(DxDx)):
-#            for i in xrange(HH):
-#                idx1 = [i*HH + ell + t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,ell),(HH,WW))                        
-#                idx2 = [i*HH + j + t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,j),(HH,WW))
-#                Hnxx[idx1, idx2] += gamma*DxDx[j,ell]
-#                Hnyy[idx1, idx2] += gamma*DxDx[j,ell]
-#                
-#        for k,i in zip(*np.nonzero(DyDy)):
-#            for j in xrange(WW):
-#                idx1 = [k*HH + j + t*HH*WW for t in range(TT)] #np.ravel_multi_index((k,j),(HH,WW))                        
-#                idx2 = [i*HH + j +t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,j),(HH,WW))
-#                Hnxx[idx1, idx2] += gamma*DyDy[k,i]
-#                Hnyy[idx1, idx2] += gamma*DyDy[k,i] 
- 
-    # Note: There are also two diagonal bands of -1's for the time coupling 
+        # Note: There are also two diagonal bands of -1's for the time coupling 
         # between frames.
         Hnxx += upper_band
         Hnxx += lower_band
@@ -210,7 +198,22 @@ def optflow_regularizer_fast(kernel,kernel_shape,bgr=True,gamma=0.16):
     print "Solving sparse matrix equation took %0.6f seconds" % (toc - tic)
     Vx_star = x_star[0:kernel.size].reshape(kernel.shape)
     Vy_star = x_star[kernel.size:].reshape(kernel.shape)
-    return Vx_star, Vy_star    
+    
+    # Now compute the actual cost
+    reg_cost = cost(kernel,Vx_star,Vy_star,gamma)
+    B = brightness_constancy(kernel,Vx_star,Vy_star)
+    Vxdx = np.tensordot(Vx_star,Dx,axes=[(3,),(0,)])
+    Vydy = np.tensordot(Dy.T,Vy_star, axes=[(1,),(2,)]).transpose(1,2,0,3)
+    B_shifted = np.concatenate((np.zeros_like(B[:,[0]]), B[:,0:-1]),axis=1)
+    grad = (B * (Vxdx + Vydy - 1) + B_shifted).reshape((N,1,TT,HH,WW))
+    
+    #grad = (Wx * Vx_star**2 + Wy * Vy_star**2).reshape((N,1,TT,HH,WW))
+    if bgr:
+        grad = np.reshape(BGR_WEIGHTS,(1,3,1,1,1))*grad
+    else:
+        grad = np.repeat(grad,C,axis=1)
+        
+    return reg_cost, grad, (Vx_star, Vy_star) 
                    
 # Manual Hessian version
 def optflow_regularizer_slow(kernel,kernel_shape,bgr=True,gamma=0.16):
@@ -548,7 +551,7 @@ def test_gradient():
     tic = time.time()
     pr = cProfile.Profile()
     pr.enable()
-    Vx_star2, Vy_star2 = optflow_regularizer_fast(filt,filt.shape,gamma=gamma)
+    _, _, (Vx_star2, Vy_star2) = optflow_regularizer_fast(filt,filt.shape,gamma=gamma)
     pr.disable()
     s = StringIO.StringIO()
     sortby = 'cumulative'
@@ -559,7 +562,56 @@ def test_gradient():
     toc = time.time()
     print "Fast ran in %0.6f seconds" % (toc - tic)
     print "Difference in cost:", cost(filt,Vx_star,Vy_star,gamma) - cost(filt,Vx_star2,Vy_star2,gamma)
+    
+def test_regularization_step():
+    import matplotlib.pyplot as plt
+    N, C, TT, H, W = 16, 3, 5, 7, 7
+    gamma = 2.
+    rng = np.random.RandomState(seed=5)
+    
+    trials = 4
+    costs = []
+    norms = []
+    lrs = np.logspace(-4,0,trials)
+    orig_filt = 20.*rng.randn(N,C,TT,H,W)
+    
+    plt.close('all')
+    for t in xrange(trials):
+        filt = np.copy(orig_filt)    
+        trial_cost = []
+        trial_norms = []
+        for step in range(100):
+            c, g, (Vx, Vy) = optflow_regularizer_fast(filt,filt.shape,gamma=gamma)
+            trial_cost.append(c)
+            trial_norms.append(np.linalg.norm(filt))
+            print "|grad| =", np.linalg.norm(g)
+            print "|filt| =", np.linalg.norm(filt)
+            print "cost   =", c
+            filt -= lrs[t]*g
             
+        costs.append(trial_cost)
+        norms.append(trial_norms)
+        plt.figure(1)
+        plt.plot(trial_cost)
+        plt.figure(2)
+        plt.plot(trial_norms)
+    
+    plt.figure(1)
+    plt.xlabel('iteration')
+    plt.ylabel('regularization penalty')
+    plt.legend(['step size = %0.3e' % x for x in lrs])
+    plt.title('Comparing Step Sizes')
+    plt.figure(2)
+    plt.xlabel('iteration')
+    plt.ylabel('Frobenius norm')
+    plt.title('Weight Decay')
+    
+def characterize_hyperparameters():
+    """ Explore the effects of the hyperparameter gamma and the weight given
+    to this regularization term as part of a larger optimization problem."""
+    
+    
 if __name__ == "__main__":
     #filt, vx, vy = test()
-    test_gradient()
+    #test_gradient()
+    test_regularization_step()
