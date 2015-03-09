@@ -1,0 +1,17 @@
+name: regnet
+video-shape: (16,112,112)
+train: data/traindb112-112.lmdb
+val: data/valdb112-112.lmdb
+batch-size: 8
+
+conv: (7,7,7) 16 reg=1
+pool: (2,2,2)
+conv: (3,3,3) 32 reg=1
+pool: (2,2,2)
+conv: (3,3,3) 64 reg=1
+pool: (2,2,2)
+conv: (3,3,3) 128 reg=1
+conv: (3,3,3) 128 reg=1
+fc: 256 reg=1
+fc: 256 reg=1
+softmax: 101 reg=1
