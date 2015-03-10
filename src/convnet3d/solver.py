@@ -59,11 +59,11 @@ class Solver:
         # Compile theano function for validation.
         val_X = conv_net.val_data.X
         val_y = conv_net.val_data.y
-        batch_size = conv_net.batch_size
+        #batch_size = conv_net.batch_size
         self.validate_model = \
             theano.function(
                 inputs=[], #[index],
-                outputs = conv_net.accuracy,
+                outputs = conv_net.accuracy_test,
                 givens={
                     conv_net.X: val_X, #[index * batch_size:(index + 1) * batch_size],
                     conv_net.y: val_y}) #[index * batch_size:(index + 1) * batch_size]})

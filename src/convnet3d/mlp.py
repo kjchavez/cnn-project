@@ -25,7 +25,8 @@ class LogRegr(object):
         W=None, b=None, borrow=True):
 
         # Weigth matrix W
-        if W != None: self.W = shared(W, name=layer_name+"_W", borrow=borrow)
+        if W != None: 
+            self.W = W
        # elif activation in (relu,softplus): 
         else:
             W_val = _asarray(rng.normal(loc=0, scale=0.01, 
@@ -38,7 +39,8 @@ class LogRegr(object):
 #                borrow=borrow)
 
         # Bias vector
-        if b!=None: self.b = shared(b, name=layer_name+"_b", borrow=borrow)
+        if b != None: 
+            self.b = b
         elif activation in (relu,softplus): 
             b_val = ones((n_out,), dtype=floatX)
             self.b = shared(value=b_val, borrow=True)
@@ -74,13 +76,15 @@ class HiddenLayer(object):
     def __init__(self, input, n_in, n_out, activation, rng, 
         layer_name="HiddenLayer", W=None, b=None, borrow=True):
 
-        if W!=None: self.W = shared(value=W, borrow=borrow, name=layer_name+'_W')
+        if W != None: 
+            self.W = W
         else:
             W_val = _asarray(rng.normal(loc=0, scale=2./sqrt(n_in), 
                 size=(n_in, n_out)), dtype=floatX)
             self.W = shared(W_val, name=layer_name+"_W", borrow=borrow)        
 
-        if b != None: self.b = shared(b, name=layer_name+"_b", borrow=borrow)
+        if b != None: 
+            self.b = b
         else: 
             # Initialize b with zeros
             self.b = shared(value=zeros((n_out,), dtype=config.floatX),
@@ -111,5 +115,5 @@ class DropoutHiddenLayer(HiddenLayer):
         super(DropoutHiddenLayer, self).__init__(
                 rng=rng, input=input, n_in=n_in, n_out=n_out, W=W, b=b,
                 activation=activation,layer_name=layer_name)
-
+        
         self.output = _dropout_from_layer(rng, self.output, p=dropout_rate)

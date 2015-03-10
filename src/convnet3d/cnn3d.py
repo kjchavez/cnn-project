@@ -10,7 +10,7 @@ import theano.tensor as T
 import numpy as np
 
 from src.convnet3d.convnet3d import PoolLayer,ConvLayer, dtensor5
-from src.convnet3d.mlp import LogRegr,DropoutHiddenLayer
+from src.convnet3d.mlp import LogRegr,DropoutHiddenLayer, HiddenLayer
 from src.convnet3d.activations import relu
 from src.convnet3d.datalayer import DataLayer
 
@@ -41,6 +41,7 @@ class ConvNet3D(object):
         self.y = T.ivector() #theano.shared(np.zeros(mem_batch_size,dtype='int32'))
         
         self.top = self.X
+        self.top_test = self.X # top most output for test time prediction
         self.top_shape = data_shape[1:] # 4D tensor indicating shape of SINGLE
                                         # training example's output at top of 
                                         # net so far
@@ -70,6 +71,7 @@ class ConvNet3D(object):
         self.layers.append(conv)
         
         self.top = conv.output
+        self.top_test = conv.output
         self.top_shape = (num_filters,) + input_volume
         
     def add_pool_layer(self,name,pool_shape):
@@ -85,6 +87,7 @@ class ConvNet3D(object):
         self.layers.append(pool)
         
         self.top = pool.output
+        self.top_test = pool.output
         self.top_shape = (self.top_shape[0],) + \
                          tuple(self.top_shape[i+1]/pool_shape[i] 
                                for i in range(3))
@@ -94,14 +97,19 @@ class ConvNet3D(object):
         """
         flat_top = self.top.flatten(ndim=2)
         input_size = np.prod(self.top_shape)
-        fc = DropoutHiddenLayer(flat_top,input_size,num_units,relu, dropout_rate,
-                                 self.rng, layer_name=name)
+        fc = DropoutHiddenLayer(flat_top,input_size,num_units,
+                                relu, dropout_rate, self.rng, layer_name=name)
                          
-         #self, input, n_in, n_out, activation, dropout_rate, use_bias, rng, W=None, b=None):
+        # Also create computation without dropout for test time
+        flat_top_test = self.top_test.flatten(ndim=2)        
+        fc_test = HiddenLayer(flat_top_test,input_size,num_units, relu, 
+                              self.rng, layer_name=name+"-test",W=fc.W,b=fc.b)
+
         self.parameters += fc.params
         self.layers.append(fc)
         
         self.top = fc.output
+        self.top_test = fc_test.output
         self.top_shape = (num_units,)
         
         
@@ -113,6 +121,10 @@ class ConvNet3D(object):
         
         softmax = LogRegr(flat_top,input_size,num_classes,None,self.rng,
                           layer_name=name)
+                          
+        flat_top_test = self.top_test.flatten(ndim=2)
+        softmax_test = LogRegr(flat_top_test,input_size,num_classes,None,self.rng,
+                               layer_name=name+'-test',W=softmax.W,b=softmax.b)
 
         self.parameters += softmax.params
         self.layers.append(softmax)
@@ -121,10 +133,13 @@ class ConvNet3D(object):
         self.top_shape = (num_classes,)
         
         # Expose some top level expressions
-        self.y_pred = softmax.y_pred
-        self.data_loss = softmax.negative_log_likelihood(self.y)
+        self.y_pred = softmax.y_pred # Using dropout
+        self.y_pred_test = softmax_test.y_pred #Using the 'integrated' network
+        self.data_loss = softmax.negative_log_likelihood(self.y) # with dropout
+        
         # Mean accuracy over the total number of examples (in the minibatch)
-        self.accuracy = 1.0 - softmax.errors(self.y)
+        self.accuracy = 1.0 - softmax.errors(self.y) # with dropout
+        self.accuracy_test = 1.0 - softmax_test.errors(self.y) # integrated
 
 def get_test_net():
     batch_size = 2

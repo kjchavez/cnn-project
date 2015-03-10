@@ -194,17 +194,6 @@ def main():
     
     best_val_acc, best_val_iter = train(args.net,args.trial_id,**kwargs)
     print best_val_acc, best_val_iter
-#    log_filename = 'results/'+properties['name']+'-trials.txt'
-#    if not os.path.exists(log_filename):
-#        with open(log_filename,'w') as fp:
-#            print >> fp, '\t'.join(['trial-id','best-val-acc',
-#                                    'best-val-iter','settings'])
-#
-#    with open(log_filename,'a') as fp:
-#        print >> fp, "\t".join(["%04d" % args.trial_id,
-#                                "%0.5f" % best_val_accuracy,
-#                                str(best_val_iter),
-#                                str(vars(args))])
 
 
 if __name__ == "__main__":
