@@ -6,6 +6,7 @@ Created on Fri Mar  6 00:12:39 2015
 
 @author: Kevin Chavez
 """
+import os
 import argparse
 import numpy as np
 
@@ -51,7 +52,7 @@ kwargs = {
 for n in xrange(args.trial_id,args.trial_id+args.num_trials):
     kwargs['lr'] = np.float32(10**np.random.uniform(-8,-4))
     kwargs['reg'] = np.float32(10**np.random.uniform(-9,-1))
-    kwargs['dropout'] = [np.float32(np.random.choice([0.2,0.4,0.6,0.8]))]
+    kwargs['dropout'] = [np.float32(np.random.choice([0.1,0.2,0.3,0.4]))]
 
     if args.optflow:
         kwargs['optflow_weight'] = np.float32(10**np.random.uniform(-2,0))
