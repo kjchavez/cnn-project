@@ -16,11 +16,10 @@ from src.dataio.datum import Datum4D
 
 APPROXIMATE_MEAN = 127.0
 MAX_ATTEMPTS = 3
-KEY_BATCH_SIZE = 10000
 
 def read_clip(capture, video_filename, num_frames, 
               height=-1, width=-1, start_frame=0, mean_subtract=True,
-              subsample=1):
+              subsample=1,num_cuts=1):
     success = capture.open(video_filename)
     
     if not success:
@@ -38,32 +37,41 @@ def read_clip(capture, video_filename, num_frames,
     left = (capture.get(CV_CAP_PROP_FRAME_WIDTH) - width)/2
     right = left + width
     
+    frame_count = int(capture.get(CV_CAP_PROP_FRAME_COUNT))
     if num_frames < 0:
         num_frames = int(capture.get(CV_CAP_PROP_FRAME_COUNT))
 
-    clip = np.empty((3,num_frames,height/subsample,width/subsample),
-                    dtype=np.int16)
-    
-    if start_frame > 0:
-        capture.set(CV_CAP_PROP_POS_FRAMES,start_frame)
-        
-    for i in xrange(num_frames):
-        frame_available, frame = capture.read()
-        if not frame_available:
-            print "Ran out of frames when reading", video_filename
-            print "Padding with %d empty frames." % (num_frames-i)
-            clip[:,i:] = 0
-            break
-            
-        if mean_subtract:
-            clip[:,i] = frame[top:bottom:subsample, left:right:subsample, :] \
-                            .transpose(2,0,1) - APPROXIMATE_MEAN
-        else:
-            clip[:,i] = frame[top:bottom:subsample, left:right:subsample, :].transpose(2,0,1)
+    start_frames = [start_frame + int((frame_count - start_frame - num_frames)
+                        / float(num_cuts)*i) for i in range(num_cuts)]
+    print "Frame count =", frame_count
+    print "Starting at", start_frames
 
+    clips = []
+    for n in range(num_cuts):
+        clip = np.empty((3,num_frames,height/subsample,width/subsample),
+                        dtype=np.int16)
+        
+        capture.set(CV_CAP_PROP_POS_FRAMES,start_frames[n])
+            
+        for i in xrange(num_frames):
+            frame_available, frame = capture.read()
+            if not frame_available:
+                print "Ran out of frames when reading", video_filename
+                print "Padding with %d empty frames." % (num_frames-i)
+                clip[:,i:] = 0
+                break
+                
+            if mean_subtract:
+                clip[:,i] = frame[top:bottom:subsample, left:right:subsample, :] \
+                                .transpose(2,0,1) - APPROXIMATE_MEAN
+            else:
+                clip[:,i] = frame[top:bottom:subsample, left:right:subsample, :].transpose(2,0,1)
+
+        clips.append(clip)
+        
     capture.release() # Shouldn't have to do this explicitly, but otherwise
                       # it crashes on certain machines after a number of videos
-    return clip
+    return clips
     
 def create_datum(clip,label):
     """ Creates a Datum structure from a 4D clip and label. """
@@ -92,7 +100,7 @@ def write_to_lmdb(env, keys, data):
         
 def convert_list(list_file,database_name,root_directory,
                  num_frames=16,width=-1,height=-1,start_frame=0,batch_size=10,
-                 map_size=100e6,randomize=False,subsample=1):
+                 map_size=100e6,randomize=False,subsample=1,num_cuts=1):
 
     capture = cv2.VideoCapture()
     env = lmdb.open(database_name,map_size=map_size,writemap=True)
@@ -100,10 +108,7 @@ def convert_list(list_file,database_name,root_directory,
     keys = []
     done = False
     batch_num = 1
-    key_list = np.arange(KEY_BATCH_SIZE)
-    if randomize:
-        np.random.shuffle(key_list)
-        
+    
     curr_key = 0
     with open(list_file) as video_list:
         while not done:
@@ -119,20 +124,16 @@ def convert_list(list_file,database_name,root_directory,
                 
                 label = int(label) - 1 # So its zero-indexed
                 full_filename = os.path.join(root_directory,filename)                
-                clip = read_clip(capture,full_filename,num_frames,height=height,
-                                 width=width,start_frame=start_frame,
-                                 subsample=subsample)
-                datum = create_datum(clip,label)
-                data.append(datum)
+                clips = read_clip(capture,full_filename,num_frames,height=height,
+                                  width=width,start_frame=start_frame,
+                                  subsample=subsample,num_cuts=num_cuts)
+                datums = [create_datum(clip,label) for clip in clips]
+                data += datums
 
-                if curr_key >= key_list.size:
-                    key_list = np.arange(curr_key,curr_key+KEY_BATCH_SIZE)
-                    if randomize:
-                        np.random.shuffle(key_list)
-                    curr_key = 0
-                    
-                keys.append("%08d_%s" % (key_list[curr_key],filename))
-                curr_key += 1
+                new_keys = ["%08d_%s" % (k,filename) 
+                            for k in range(curr_key,curr_key+num_cuts)]
+                keys += new_keys
+                curr_key += num_cuts
 
             for n in range(MAX_ATTEMPTS):
                 success = write_to_lmdb(env,keys,data)
@@ -165,15 +166,13 @@ def main():
                              " so make sure you have space for it).")
     parser.add_argument("--mapsize","-m",type=int,default=100e6,
                         help="Maximum size of lmdb database")
-    parser.add_argument("--randomize",'-r',action="store_true",
-                        default=False)
     parser.add_argument("--subsample", type=int, default=1,
                         help="ratio by which to subsample. Note width/height "
                              "must be divisible by this")
-#    parser.add_argument("--cuts",'-c',type=int,default=1,
-#                        help="Number of temporal cuts to take from video. The"
-#                             " first cut will start from the first frame, then"
-#                             " staggered, possibly overlapping.")
+    parser.add_argument("--cuts",'-c',type=int,default=1,
+                        help="Number of temporal cuts to take from video. The"
+                             " first cut will start from the first frame, then"
+                             " staggered, possibly overlapping.")
 
     args = parser.parse_args()
 
@@ -185,7 +184,7 @@ def main():
     convert_list(args.input_file,args.database_name,args.root,
                  num_frames=args.length,width=args.width,height=args.height,
                  start_frame=0,batch_size=args.batchsize,map_size=args.mapsize,
-                 randomize=args.randomize,subsample=args.subsample)
+                 num_cuts=args.cuts,subsample=args.subsample)
 
 if __name__ == "__main__":
     main()
