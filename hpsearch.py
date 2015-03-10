@@ -22,7 +22,7 @@ parser.add_argument("--trial-id",dest="trial_id",type=int,default=0,
                     help="ID for first trial, rest will be sequential")
 parser.add_argument("--num-trials","-n",dest="num_trials",type=int,default=10,
                     help="Number of trials of random search to run")
-parser.add_argument("--num-iterations","-i",dest="num_iter",type=int,default=2000,
+parser.add_argument("--num-iterations","-i",dest="num_iter",type=int,default=5000,
                     help="Number of iterations to run each trial")
                     
 args = parser.parse_args()
@@ -43,8 +43,8 @@ kwargs = {
     'mom_final' : 0.9,
     'mom_step' : 0.1,
     'num_iter' : args.num_iter,
-    'snapshot_rate' : 500,
-    'validate_rate' : 500
+    'snapshot_rate' : 1000,
+    'validate_rate' : 1000
 }
 
 # Searching on parameters:
