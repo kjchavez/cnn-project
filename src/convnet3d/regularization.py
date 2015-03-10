@@ -70,7 +70,7 @@ def smoothness(Vx,Vy):
 
 def cost(filt,Vx,Vy,gamma):
     B = brightness_constancy(filt,Vx,Vy) 
-    return (0.5*np.sum(B*B) + gamma * smoothness(Vx,Vy)) / filt.size * filt.shape[1]
+    return (0.5*np.sum(B*B) + gamma * smoothness(Vx,Vy)) / filt.shape[0]
     
 def grad(filt,Vx,Vy,gamma,bgr=True):
     N, TT, HH, WW = Vx.shape
@@ -99,12 +99,25 @@ def grad(filt,Vx,Vy,gamma,bgr=True):
                    
     return dVx / Vx.size, dVy / Vy.size
     
-def optflow_regularizer_fast(kernel,kernel_shape,bgr=True,gamma=0.16):
-    N, C, TT, HH, WW = kernel_shape
-    # Random initialization. Only matters to make sure problem is well-
-    # conditioned.
-    #Vxt = np.zeros((HH,WW)) # for all t
-    #Vyt = np.zeros((HH,WW)) # for all t
+def optflow_regularizer_fast(kernel,bgr=True,gamma=0.16):
+    """ Scipy-based implementation of the optical flow regularizer.
+    
+    Args:
+        kernel: 5D tensor of filter weights
+        bgr: boolean indicating if this filter is applied to raw pixel data
+        gamma: relative importance of the smoothness criterion in the optical
+               flow computation
+               
+    Returns:
+        A tuple containing:
+        
+            (regularization cost, gradient wrt kernel, (Vx_star, Vy_star))
+        
+        The last element can usually be disregarded--it's the velocity vector
+        field that achieves the minimum of the optical flow loss function, but
+        this is not needed in the larger ConvNet framework.
+    """
+    N, C, TT, HH, WW = kernel.shape
     
     # Flatten kernel along channels
     if bgr:
@@ -138,14 +151,14 @@ def optflow_regularizer_fast(kernel,kernel_shape,bgr=True,gamma=0.16):
     gamma_band = np.zeros((TT*HH*WW,TT*HH*WW))
     for j,ell in zip(*np.nonzero(DxDx)):
         for i in xrange(HH):
-            idx1 = [i*HH + ell + t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,ell),(HH,WW))                        
-            idx2 = [i*HH + j + t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,j),(HH,WW))
+            idx1 = [i*HH + ell + t*HH*WW for t in range(TT)]                    
+            idx2 = [i*HH + j + t*HH*WW for t in range(TT)]
             gamma_band[idx1, idx2] += gamma*DxDx[j,ell]
             
     for k,i in zip(*np.nonzero(DyDy)):
         for j in xrange(WW):
-            idx1 = [k*HH + j + t*HH*WW for t in range(TT)] #np.ravel_multi_index((k,j),(HH,WW))                        
-            idx2 = [i*HH + j +t*HH*WW for t in range(TT)] #np.ravel_multi_index((i,j),(HH,WW))
+            idx1 = [k*HH + j + t*HH*WW for t in range(TT)]                     
+            idx2 = [i*HH + j +t*HH*WW for t in range(TT)]
             gamma_band[idx1, idx2] += gamma*DyDy[k,i]
 
     for n in range(N):
@@ -157,8 +170,6 @@ def optflow_regularizer_fast(kernel,kernel_shape,bgr=True,gamma=0.16):
             Hyy = np.zeros((HH*WW,HH*WW))
             Hxy = np.zeros((HH*WW,HH*WW))
             
-            # Hint: Use np.ravel_multi_index
-            #start_idx = np.ravel_multi_index((n,c,t,0,0),kernel.shape)
             np.fill_diagonal(Hxx,np.ravel(Wx[n,t]**2) + gamma*(2.0 if t > 0 else 1.0))
             np.fill_diagonal(Hyy,np.ravel(Wy[n,t]**2) + gamma*(2.0 if t > 0 else 1.0))
                 
@@ -192,10 +203,10 @@ def optflow_regularizer_fast(kernel,kernel_shape,bgr=True,gamma=0.16):
 
     hess = hess.tocsr()
     g = np.hstack([gVx.ravel(),gVy.ravel()])
-    tic = time.time()
+    #tic = time.time()
     x_star = -scipy.sparse.linalg.spsolve(hess,g)
-    toc = time.time()
-    print "Solving sparse matrix equation took %0.6f seconds" % (toc - tic)
+    #toc = time.time()
+    #print "Solving sparse matrix equation took %0.6f seconds" % (toc - tic)
     Vx_star = x_star[0:kernel.size].reshape(kernel.shape)
     Vy_star = x_star[kernel.size:].reshape(kernel.shape)
     
@@ -207,120 +218,12 @@ def optflow_regularizer_fast(kernel,kernel_shape,bgr=True,gamma=0.16):
     B_shifted = np.concatenate((np.zeros_like(B[:,[0]]), B[:,0:-1]),axis=1)
     grad = (B * (Vxdx + Vydy - 1) + B_shifted).reshape((N,1,TT,HH,WW))
     
-    #grad = (Wx * Vx_star**2 + Wy * Vy_star**2).reshape((N,1,TT,HH,WW))
     if bgr:
-        grad = np.reshape(BGR_WEIGHTS,(1,3,1,1,1))*grad
+        grad = np.reshape(BGR_WEIGHTS,(1,3,1,1,1))*grad / N
     else:
-        grad = np.repeat(grad,C,axis=1)
+        grad = np.repeat(grad,C,axis=1) / N
         
     return reg_cost, grad, (Vx_star, Vy_star) 
-                   
-# Manual Hessian version
-def optflow_regularizer_slow(kernel,kernel_shape,bgr=True,gamma=0.16):
-    N, C, TT, HH, WW = kernel_shape
-    # Random initialization. Only matters to make sure problem is well-
-    # conditioned.
-    #Vxt = np.zeros((HH,WW)) # for all t
-    #Vyt = np.zeros((HH,WW)) # for all t
-    
-    # Flatten kernel along channels
-    if bgr:
-        kernel = 0.2989*kernel[:,2] + 0.5870*kernel[:,1] + 0.1140*kernel[:,0]
-    else:
-        kernel = np.mean(kernel,axis=1)
-    
-    # Derivative approximation matrices
-    Dx = np.diag([1.]*(WW-1),1) + np.diag([-1.]*(WW-1),-1)
-    DxDx = Dx.T.dot(Dx)
-    Dy = np.diag([1.]*(HH-1),1) + np.diag([-1.]*(HH-1),-1)
-    DyDy = Dy.T.dot(Dy)
-    
-    gVx = np.empty_like(kernel)
-    gVy = np.empty_like(kernel)
-    
-    Hxx_diag_blocks = []
-    Hyy_diag_blocks = []
-    Hxy_diag_blocks = []
-    for n in range(N):
-        Hnxx_diag_blocks = []
-        Hnyy_diag_blocks = []
-        for t in range(TT):
-            Wt = kernel[n,t]
-            Wt1 = kernel[n,t+1] if t < TT-1 else np.zeros_like(Wt)
-            # Create gradients
-#                B = (Wt.dot(Dx.T) * Vxt + Dy.dot(Wt) * Vyt + Wt1 - Wt)
-#                dVxt = B * Wt.dot(Dx.T) + gamma*(Vxt.dot(DxDx) + DyDy.dot(Vxt)
-#                                                 + 0) #
-#                dVyt = B * Dy.dot(Wt) + gamma*(Vyt.dot(DxDx) + DyDy.dot(Vyt)
-#                                                + 0)
-            # Create gradients assuming initial point is Vx = Vy = 0
-            B = Wt1 - Wt
-            dVxt = B * Wt.dot(Dx.T)
-            dVyt = B * Dy.dot(Wt)
-            
-            gVx[n,t] = dVxt
-            gVy[n,t] = dVyt
-            
-            # Compute sparse Hessian
-            Hxx = scipy.sparse.lil_matrix((HH*WW,HH*WW))
-            Hyy = scipy.sparse.lil_matrix((HH*WW,HH*WW))
-            Hxy = scipy.sparse.lil_matrix((HH*WW,HH*WW))
-            
-            # Hint: Use np.ravel_multi_index
-            #start_idx = np.ravel_multi_index((n,c,t,0,0),kernel.shape)
-            Hxx.setdiag(np.ravel(Wt.dot(Dx.T)**2) + gamma*(2.0 if t > 0 else 1.0))
-            Hyy.setdiag(np.ravel(Dy.dot(Wt)**2) + gamma*(2.0 if t > 0 else 1.0))
-            
-            for j,ell in zip(*np.nonzero(DxDx)):
-                for i in xrange(HH):
-                    idx1 = np.ravel_multi_index((i,ell),(HH,WW))                        
-                    idx2 = np.ravel_multi_index((i,j),(HH,WW))
-                    Hxx[idx1, idx2] += gamma*DxDx[j,ell]
-                    Hyy[idx1, idx2] += gamma*DxDx[j,ell]
-                    
-            for k,i in zip(*np.nonzero(DyDy)):
-                for j in xrange(WW):
-                    idx1 = np.ravel_multi_index((k,j),(HH,WW))                        
-                    idx2 = np.ravel_multi_index((i,j),(HH,WW))
-                    Hxx[idx1, idx2] += gamma*DyDy[k,i]
-                    Hyy[idx1, idx2] += gamma*DyDy[k,i]
-                    
-            Hxy.setdiag(np.ravel(Dy.dot(Wt)*Wt.dot(Dx.T)))
-            Hnxx_diag_blocks.append(Hxx)
-            Hnyy_diag_blocks.append(Hyy)
-            Hxy_diag_blocks.append(Hxy)
-            
-        Hnxx = scipy.sparse.block_diag(Hnxx_diag_blocks,format='lil')
-        Hnyy = scipy.sparse.block_diag(Hnyy_diag_blocks,format='lil')
- 
-        # Note: There are also two diagonal bands of -1's for the time coupling 
-        # between frames.
-        Hnxx.setdiag([-gamma]*HH*WW*(TT-1),k=HH*WW)
-        Hnxx.setdiag([-gamma]*HH*WW*(TT-1),k=-HH*WW)
-        Hnyy.setdiag([-gamma]*HH*WW*(TT-1),k=HH*WW)
-        Hnyy.setdiag([-gamma]*HH*WW*(TT-1),k=-HH*WW)
-        
-        Hxx_diag_blocks.append(Hnxx)
-        Hyy_diag_blocks.append(Hnyy)
-        
-                
-    # Construct full hessian
-    hess_xx = scipy.sparse.block_diag(Hxx_diag_blocks)
-    hess_yy = scipy.sparse.block_diag(Hyy_diag_blocks)
-    hess_xy = scipy.sparse.block_diag(Hxy_diag_blocks)
-    hess = scipy.sparse.bmat([[hess_xx, hess_xy],[hess_xy,hess_yy]])
-
-    hess = hess.tocsr()
-    g = np.hstack([gVx.ravel(),gVy.ravel()])
-    print g.dtype
-    print hess.dtype
-    tic = time.time()
-    x_star = -scipy.sparse.linalg.spsolve(hess,g)
-    toc = time.time()
-    print "Solving sparse matrix equation took %0.6f seconds" % (toc - tic)
-    Vx_star = x_star[0:kernel.size].reshape(kernel.shape)
-    Vy_star = x_star[kernel.size:].reshape(kernel.shape)
-    return Vx_star, Vy_star
                         
 def optical_flow_regularizer(kernel,kernel_shape,
                              rng=RandomState(1234),bgr=True,gamma=0.16,
@@ -482,7 +385,7 @@ def test():
     noise = 20.*rng.randn(N,C,TT,H,W)
     filt = noise #theano.shared(noise.astype(theano.config.floatX),borrow=True)
     tic = time.time()
-    vx,vy = optflow_regularizer_slow(filt,filt.shape,gamma=gamma)
+    vx,vy = optflow_regularizer_fast(filt,filt.shape,gamma=gamma)
     toc = time.time()
     print "Full operation took %0.6f seconds" % (toc - tic)
     opt_cost = cost(filt,vx,vy,gamma)
@@ -540,14 +443,10 @@ def test_gradient():
         print norms
         costs.append(new_cost)
         
-    #plt.plot(costs)
-    #print costs[-1]
+    plt.plot(costs)
+    print "Final cost obtained by gradient descent:", costs[-1]
 
-    # Try with the Hessian
-    tic = time.time()
-    Vx_star, Vy_star = optflow_regularizer_slow(filt,filt.shape,gamma=gamma)
-    toc = time.time()
-    print "Slow ran in %0.6f seconds" % (toc - tic)
+    # Try with the Hessian, profile computation
     tic = time.time()
     pr = cProfile.Profile()
     pr.enable()
@@ -557,11 +456,9 @@ def test_gradient():
     sortby = 'cumulative'
     ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
     ps.print_stats()
-    print s.getvalue()
-    
+    print s.getvalue()    
     toc = time.time()
     print "Fast ran in %0.6f seconds" % (toc - tic)
-    print "Difference in cost:", cost(filt,Vx_star,Vy_star,gamma) - cost(filt,Vx_star2,Vy_star2,gamma)
     
 def test_regularization_step():
     import matplotlib.pyplot as plt
