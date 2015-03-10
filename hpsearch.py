@@ -21,6 +21,8 @@ parser.add_argument("--trial-id",dest="trial_id",type=int,default=0,
                     help="ID for first trial, rest will be sequential")
 parser.add_argument("--num-trials","-n",dest="num_trials",type=int,default=10,
                     help="Number of trials of random search to run")
+parser.add_argument("--num-iterations","-i",dest="num_iter",type=int,default=2000,
+                    help="Number of iterations to run each trial")
                     
 args = parser.parse_args()
 
@@ -39,16 +41,16 @@ kwargs = {
     'mom_init' : 0.5,
     'mom_final' : 0.9,
     'mom_step' : 0.1,
-    'num_iter' : 2000,
+    'num_iter' : args.num_iter,
     'snapshot_rate' : 500,
     'validate_rate' : 500
 }
 
 # Searching on parameters:
 # learning_rate, reg, dropout
-for n in xrange(args.num_trials):
-    kwargs['lr'] = np.float32(10**np.random.uniform(-8,-3))
-    kwargs['reg'] = np.float32(10**np.random.uniform(-8,1))
+for n in xrange(args.trial_id,args.trial_id+args.num_trials):
+    kwargs['lr'] = np.float32(10**np.random.uniform(-8,-4))
+    kwargs['reg'] = np.float32(10**np.random.uniform(-9,-1))
     kwargs['dropout'] = [np.float32(np.random.choice([0.2,0.4,0.6,0.8]))]
 
     if args.optflow:
@@ -70,9 +72,15 @@ for n in xrange(args.num_trials):
                          (n, kwargs['lr'], kwargs['reg'], str(kwargs['dropout']), 
                           best_val_acc, best_val_iter)
         print "Completed trial %d." % n
-                    
-    val_acc, val_iter = train(net_file, n + args.trial_id, **kwargs.copy())
-    if val_acc and val_iter:
+
+    while True:
+        try:                    
+	    val_acc, val_iter = train(net_file, n, **kwargs.copy())
+        except:
+	    print "Train function failed. Restarting..."
+            os.rmdir("results/%s-%04d" % (net_file.split('/')[1].split('.')[0],n))
+            continue
+
+        # Once successful, log results
         log_result(val_acc,val_iter)
-    else:
-        print "Trial failed."
+        break
