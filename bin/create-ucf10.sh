@@ -1,12 +1,9 @@
 #!/bin/bash
-head -985 data/ucfTrainTestlist/trainlist01.txt > data/ucfTrainTestlist/train10class.txt
-head -389 data/ucfTrainTestlist/testlist01.txt > data/ucfTrainTestlist/test10class.txt
+python -m src.preprocessing.trainval_split data/ucfTrainTestlist/trainlist01.txt -c 10
 
 # Split training set into train and validation sets
-shuf data/ucfTrainTestlist/train10class.txt > shuffled.txt
-head -850 shuffled.txt > data/ucfTrainTestlist/train.txt
-tail shuffled.txt --lines=+851 > data/ucfTrainTestlist/val.txt
-rm shuffled.txt
+shuf data/ucfTrainTestlist/train.txt --output data/ucfTrainTestlist/train.txt
+shuf data/ucfTrainTestlist/val.txt --output data/ucfTrainTestlist/val.txt
 
 python -m src.preprocessing.convert2lmdb data/ucfTrainTestlist/train.txt data/UCF-101 data/train-10class.lmdb --batchsize 25 --mapsize 25000000000 --height 224 --width 224 --subsample 2 --cuts 4
 
