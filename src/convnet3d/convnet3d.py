@@ -45,7 +45,7 @@ class ConvLayer(object):
         else: 
             # fan in: filter time x filter height x filter width x input maps
             fan_in = prod(kernel_shape)*n_in_maps
-            norm_scale = 2. * sqrt( 1. / fan_in )
+            norm_scale = sqrt( 2. / fan_in )
             W_shape = (n_out_maps, n_in_maps)+kernel_shape
             W_val = _asarray(rng.normal(loc=0, scale=norm_scale, size=W_shape),\
                         dtype=floatX)
@@ -55,11 +55,10 @@ class ConvLayer(object):
         # init bias
         if b != None: 
             b_val = b
-        elif activation in (relu,softplus): 
-            b_val = ones((n_out_maps,), dtype=floatX)
         else: 
             b_val = zeros((n_out_maps,), dtype=floatX)
-        self.b = shared(b_val, name=layer_name+"_b", borrow=borrow)
+        
+	self.b = shared(b_val, name=layer_name+"_b", borrow=borrow)
         self.params.append(self.b)
         
         # Zero pad to simulate a 'same' convolution

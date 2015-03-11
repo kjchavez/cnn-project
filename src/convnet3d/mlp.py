@@ -29,7 +29,8 @@ class LogRegr(object):
             self.W = W
        # elif activation in (relu,softplus): 
         else:
-            W_val = _asarray(rng.normal(loc=0, scale=sqrt(2.0/n_in), 
+            print sqrt(2.0/n_in)
+            W_val = _asarray(rng.normal(loc=0, scale=0.001,#sqrt(2.0/n_in), 
                 size=(n_in, n_out)), dtype=floatX)
             self.W = shared(W_val, name=layer_name+"_W", borrow=borrow)
 
