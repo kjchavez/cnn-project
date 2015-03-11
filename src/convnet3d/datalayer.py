@@ -10,12 +10,19 @@ import theano.tensor as T
 import numpy as np
 from src.dataio.fetcher import DataFetcher
 
+def fetcher_loop(fetcher,shmem):
+    """ Worker process that fills the queue as needed and as fast as it can.
+    """
+    while True:
+        X, y, crossed_epoch = fetcher.load_data()
+        # Put into shared memory array
+
 class DataLayer:
     """ Wrapper around lmdb database for creating/updating GPU-sized chunks of
-    training data.
+    training data. Multiprocessed.
     """
     def __init__(self,db_name,video_shape,mem_batch_size):
-        self.fetcher = DataFetcher(db_name,video_shape,dtype=theano.config.floatX)
+        self.fetcher = DataFetcher(db_name,video_shape,mem_batch_size,dtype=theano.config.floatX)
         self.batch_size = mem_batch_size
         self.video_shape = video_shape
         self.current_batch = 0
@@ -38,6 +45,7 @@ class DataLayer:
             return True
         else:
             return False
+            
             
 def test():
     import numpy as np

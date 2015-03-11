@@ -10,8 +10,10 @@ from src.dataio.datum import Datum4D
 from src.constants import *
 
 class DataFetcher(object):
-    def __init__(self,database_name,video_shape,dtype='float32'):
+    def __init__(self,database_name,video_shape,batch_size,dtype='float32'):
         self.db_name = database_name
+        self.video_shape = video_shape
+        self.batch_size = batch_size
         self.env = lmdb.open(database_name)
         self.txn = self.env.begin()
         self.cursor = self.txn.cursor()
@@ -20,18 +22,18 @@ class DataFetcher(object):
         self.dtype = dtype
         self.epoch = 0
         
-    def load_data(self,batch_size,video_shape):
+    def load_data(self):
         """Fetches a set of videos from an LMDB database.
         
         Args:
             batch_size - number of videos to load into memory
             video_shape - 3 tuple (frames, height, width) for videos
         """
-        TT, HH, WW = video_shape
-        X = np.empty((batch_size,3) + video_shape,dtype=self.dtype)
-        y = np.empty((batch_size,),dtype=self.dtype)
+        TT, HH, WW = self.video_shape
+        X = np.empty((self.batch_size,3) + video_shape,dtype=self.dtype)
+        y = np.empty((self.batch_size,),dtype=self.dtype)
         crossed_epoch = False
-        for n in xrange(batch_size):
+        for n in xrange(self.batch_size):
             try:
                 key,value = next(self.iterator)
             except StopIteration:
