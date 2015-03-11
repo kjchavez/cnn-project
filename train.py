@@ -179,6 +179,8 @@ def main():
                         help="Seed value for random number generator")
     parser.add_argument("--num-iter",'-n',dest="num_iter",type=int,default=20000,
                         help="Number of iterations to train network")
+    parser.add_argument("--optflow-weight",dest='optflow_weight',type=float,
+			default=0,help="Optflow regularization parameter")
     parser.add_argument("--resume",type=int,default=None,
                         help="Snapshot file to resume training. Up to user to "
                              "provide valid snapshots, since only parameter "

@@ -99,7 +99,7 @@ def grad(filt,Vx,Vy,gamma,bgr=True):
                    
     return dVx / Vx.size, dVy / Vy.size
     
-def optflow_regularizer_fast(kernel,bgr=True,gamma=0.16):
+def optflow_regularizer_fast(kernel,bgr=True,gamma=1.0):
     """ Scipy-based implementation of the optical flow regularizer.
     
     Args:

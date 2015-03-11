@@ -220,8 +220,8 @@ class Solver:
         start_time = time.clock()
 
         # Allocate space for optflow momentum if necessary
-        if optflow_weight > 0:
-            optflow_momentum = np.zeros_like(self.conv_net.parameters[0])
+        #if optflow_weight > 0:
+        #    optflow_momentum = np.zeros_like(self.conv_net.parameters[0])
         
         print "Starting training..."    
         loss_history = []
@@ -239,14 +239,15 @@ class Solver:
                                             W.get_value(borrow=True).shape)
                                             
                 minibatch_avg_cost, train_acc = self.train_model()+optflow_weight*reg_loss
-                m = self.momentum.get_value()
-                optflow_momentum = \
-                    m * optflow_momentum - (1. - m) * \
-                    self.learning_rate.get_value(borrow=True) * \
-                    optflow_weight * reg_grad
-                    
-                W.set_value(W.get_value(borrow=True) + 
-                            optflow_momentum.astype(theano.config.floatX))
+                #m = self.momentum.get_value()
+                #optflow_momentum = \
+                #    m * optflow_momentum - (1. - m) * \
+                #    self.learning_rate.get_value(borrow=True) * \
+                #    optflow_weight * reg_grad
+                new_W = W.get_value(borrow=True) - \
+                        0.5*optflow_weight*reg_grad
+                W.set_value(new_W.astype(theano.config.floatX))
+                            #optflow_momentum.astype(theano.config.floatX))
             else:
                 # Train this batch
                 minibatch_avg_cost, train_acc = self.train_model()
@@ -255,7 +256,11 @@ class Solver:
             train_acc_history.append(train_acc)
                                                                 
             if iteration % loss_rate == 0:
-                print "minibatch loss:", minibatch_avg_cost
+                if optflow_weight > 0: 
+                    print "minibatch loss: %0.4f (%0.4f optflow)" % \
+                          (minibatch_avg_cost,optflow_weight*reg_loss)
+                else:
+                    print "minibatch loss:", minibatch_avg_cost
 
             if epoch_ended:
                 epoch_counter += 1

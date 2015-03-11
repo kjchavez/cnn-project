@@ -44,8 +44,8 @@ kwargs = {
     'mom_final' : 0.9,
     'mom_step' : 0.1,
     'num_iter' : args.num_iter,
-    'snapshot_rate' : 500,
-    'validate_rate' : 500
+    'snapshot_rate' : 200,
+    'validate_rate' : 200
 }
 
 # Searching on parameters:
@@ -57,7 +57,7 @@ for n in xrange(args.trial_id,args.trial_id+args.num_trials):
 
     if args.optflow:
         # Run optflow experiments
-        optflow_weight = np.float32(10**np.random.uniform(-2,0))
+        optflow_weight = np.float32(10**np.random.uniform(-1,1))
         print "Starting trial with lr %0.4e, reg %0.4e, dropout %0.2f, optflow-reg %0.3e" % \
               (kwargs['lr'], kwargs['reg'], kwargs['dropout'][0], optflow_weight)
               
@@ -69,15 +69,15 @@ for n in xrange(args.trial_id,args.trial_id+args.num_trials):
             with open(logfilename,'a') as fp:
                 print >> fp, "%03d\t%0.4e\t%0.4e\t%s\t%0.3e\t%0.4f\t%06d\t%0.4f\t%06d" % \
                          (n, kwargs['lr'], kwargs['reg'], str(kwargs['dropout']), 
-                          kwargs['optflow_weight'],best_val_acc, best_val_iter,
+                          optflow_weight,best_val_acc, best_val_iter,
                           optflow_acc, optflow_iter)
                               
             print "Completed trial %d." % n
 
-        val_acc, val_iter = train(net_file, n, **kwargs.copy())
         kwargs['optflow_weight'] = optflow_weight
         optflow_acc, optflow_iter = train(net_file, n + 1000,**kwargs.copy())
-
+        del kwargs['optflow_weight']
+	val_acc, val_iter = train(net_file, n, **kwargs.copy())
         
         log_result(val_acc,val_iter,optflow_acc,optflow_iter)
 
