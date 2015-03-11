@@ -1,7 +1,7 @@
 name: tinynet
 video-shape: (16,112,112)
-train: data/tinytrainhalf.lmdb
-val: data/tinytrainhalf.lmdb
+train: data/tinytraindb.lmdb
+val: data/tinyvaldb.lmdb
 batch-size: 2
 
 conv: (5,5,7) 2 reg=1
