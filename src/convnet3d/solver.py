@@ -249,7 +249,8 @@ class Solver:
                                             W.get_value(borrow=True),
                                             W.get_value(borrow=True).shape)
                                             
-                minibatch_avg_cost, train_acc = self.train_model()+optflow_weight*reg_loss
+                minibatch_avg_cost, train_acc = self.train_model()
+                minibatch_avg_cost += optflow_weight*reg_loss
                 #m = self.momentum.get_value()
                 #optflow_momentum = \
                 #    m * optflow_momentum - (1. - m) * \
