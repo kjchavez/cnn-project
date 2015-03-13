@@ -143,8 +143,8 @@ class ConvNet3D(object):
 
 def get_test_net():
     batch_size = 2
-    video_shape = (16,240,320)
-    net = ConvNet3D("test",video_shape,batch_size)
+    video_shape = (16,112,112)
+    net = ConvNet3D("test",video_shape, batch_size)
     
     num_classes = 101
     net.add_train_data("data/tinytraindb.lmdb")

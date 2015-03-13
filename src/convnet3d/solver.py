@@ -30,11 +30,7 @@ class Solver:
                                  opt_params["method"])
 
         learning_rate_decay = opt_params['lr_decay']    
-        
-        # Might be unnecessary... I think our minibatch is limited by the amount
-        # of GPU memory so we'll only ever use index = 0....
-        index = T.lscalar()
-        
+                
         self.learning_rate = theano.shared(np.asarray(base_learning_rate,
             dtype=theano.config.floatX))
 
@@ -44,7 +40,6 @@ class Solver:
                 outputs=self.learning_rate,
                 updates={self.learning_rate: self.learning_rate * learning_rate_decay})
                 
-
         if self.method == "momentum":
             self.momentum = theano.shared(np.asarray(momentum,
                                           dtype=theano.config.floatX))
@@ -65,10 +60,10 @@ class Solver:
                 inputs=[], #[index],
                 outputs = conv_net.accuracy_test,
                 givens={
-                    conv_net.X: val_X, #[index * batch_size:(index + 1) * batch_size],
-                    conv_net.y: val_y}) #[index * batch_size:(index + 1) * batch_size]})
-        #theano.printing.pydotprint(validate_model, outfile="test_file.png",
-        #        var_with_name_simple=True)
+                    conv_net.X: val_X,
+                    conv_net.y: val_y})
+#        theano.printing.pydotprint(self.validate_model, outfile="test_file.png",
+#                var_with_name_simple=True)
         
         # Compute gradients of the model wrt parameters. We will also explicitly
         # construct and incorporate the regularization terms in this loop.
@@ -147,12 +142,12 @@ class Solver:
                 outputs = [loss,conv_net.accuracy],
                 updates = updates,
                 givens = {
-                    conv_net.X: train_X, #[index * batch_size:(index + 1) * batch_size],
-                    conv_net.y: train_y }) #[index * batch_size:(index + 1) * batch_size]})
-        #theano.printing.pydotprint(train_model, outfile="train_file.png",
-        #        var_with_name_simple=True)
-    
-
+                    conv_net.X: train_X,
+                    conv_net.y: train_y })
+                    
+        # Print the computation graph to a file for examination
+#        theano.printing.pydotprint(self.train_model, outfile="train_file.png",
+#                var_with_name_simple=True)
                 
     def validate(self):
         epoch_ended = False
@@ -171,28 +166,32 @@ class Solver:
             n_iter:          number of minibatches to train with
             snapshot_params: a dictionary of parameters dictating when and
                              where to save snapshots of the model
+            savepath:        directory in which to save all info about training
             validate_rate:   compute and print validation accuracy every this
                              many iterations of training
             loss_rate:       print minibatch training loss every loss_rate iters
+            optflow_weight: weight to attribute to the optflow regularizer
+                            (yes, its strange for this parameter to be at this 
+                            high of a level in the hierarchy, but this is critical
+                            for our experiments)
         """
         snapshot_rate = snapshot_params['rate']
         snapshot_dir = os.path.join(savepath,snapshot_params['dir'])
         if not os.path.isdir(snapshot_dir):
             os.makedirs(snapshot_dir)
+            
         # Write the list of parameters:
         with open(os.path.join(savepath,"parameter-names.txt"),'w') as fp:
             for param in self.conv_net.parameters:
                 print >> fp, param.name
-                
+        
+        # File name for snapshots, just fill in with iteration number
         filepattern = os.path.join(
                         snapshot_dir,
                         self.conv_net.name+".snapshot.iter-%06d")
-
                                 
         best_validation_acc = -1.0
         best_validation_iter = None
-        loss_history_filename = os.path.join(savepath,"loss-history.txt")
-        train_acc_filename = os.path.join(savepath,"train-acc-history.txt")
         first_iteration = 1
         epoch_counter = 0
                         
@@ -219,13 +218,22 @@ class Solver:
 
         start_time = time.clock()
 
-        # Allocate space for optflow momentum if necessary
-        #if optflow_weight > 0:
-        #    optflow_momentum = np.zeros_like(self.conv_net.parameters[0])
+        print "Starting training..."
         
-        print "Starting training..."    
-        loss_history = []
-        train_acc_history = []
+        # Create directory to hold history
+        history_dir = os.path.join(savepath,"history")
+        if not os.path.isdir(history_dir):
+            os.mkdir(history_dir)
+
+        # Filenames for various metrics
+        history = {}
+        history["loss"] = []
+        history["train-accuracy"] = []
+        history["optflow-cost"] = []
+        history["optflow-normgrad"] = []
+        history["filter-norm"] = []
+        history["data-normgrad"] = []
+    
         for iteration in xrange(first_iteration,first_iteration+n_iter):
             epoch_ended = self.conv_net.train_data.load_batch()
 
@@ -245,15 +253,20 @@ class Solver:
                 #    self.learning_rate.get_value(borrow=True) * \
                 #    optflow_weight * reg_grad
                 new_W = W.get_value(borrow=True) - \
-                        0.5*optflow_weight*reg_grad
+                        self.learning_rate.get_value(borrow=True)*optflow_weight*reg_grad
                 W.set_value(new_W.astype(theano.config.floatX))
                             #optflow_momentum.astype(theano.config.floatX))
+                history["optflow-cost"].append(optflow_weight*reg_loss)
+                history["optflow-normgrad"].append(optflow_weight*np.linalg.norm(reg_grad))
+                history["filter-norm"].append(np.linalg.norm(W.get_value(borrow=True)))
+                #history["data-normgrad"].append() # TODO: Return norm from somewhere
             else:
                 # Train this batch
                 minibatch_avg_cost, train_acc = self.train_model()
                         
-            loss_history.append(minibatch_avg_cost)
-            train_acc_history.append(train_acc)
+            history["loss"].append(minibatch_avg_cost)
+            history["train-accuracy"].append(train_acc)
+ 
                                                                 
             if iteration % loss_rate == 0:
                 if optflow_weight > 0: 
@@ -280,18 +293,13 @@ class Solver:
                 
                 with open(val_history_filename,'a') as fp:
                     print >> fp, iteration, val_accuracy
-                
-                # Flush loss history
-                with open(loss_history_filename,'a') as fp:
-                    for loss in loss_history:
-                        print >> fp, loss
-                    loss_history = []
 
-                # Flush train accuracy history
-                with open(train_acc_filename,'a') as fp:
-                    for acc in train_acc_history:
-                        print >> fp, acc
-                    train_acc_history = []
+                # Flush all statistics to disk
+                for stat in history:
+                    with open(os.path.join(history_dir,stat+".txt"),'a') as fp:
+                        for pt in history[stat]:
+                            print >> fp, pt
+                    history[stat] = [] # reset so we don't run out of memory
                         
                 if (val_accuracy > best_validation_acc):
                     print "** Best score so far **"
