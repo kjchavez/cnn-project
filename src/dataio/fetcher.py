@@ -30,7 +30,7 @@ class DataFetcher(object):
             video_shape - 3 tuple (frames, height, width) for videos
         """
         TT, HH, WW = self.video_shape
-        X = np.empty((self.batch_size,3) + video_shape,dtype=self.dtype)
+        X = np.empty((self.batch_size,3) + self.video_shape,dtype=self.dtype)
         y = np.empty((self.batch_size,),dtype=self.dtype)
         crossed_epoch = False
         for n in xrange(self.batch_size):
