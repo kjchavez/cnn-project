@@ -58,13 +58,13 @@ def test():
     import time
     import cv2
     
-    db = "data/traindb.lmdb"
-    shape = (16,240,320)
-    fetcher = DataFetcher(db,shape)
+    db = "data/tinytraindb.lmdb"
+    shape = (16,112,112)
+    fetcher = DataFetcher(db,shape,8)
     
     # Fetch from database, possibly overflowing and repeating
     tic = time.time()
-    X, y, _ = fetcher.load_data(50,shape)
+    X, y, _ = fetcher.load_data()
     toc = time.time()
     im = X[0,:,0].transpose(1,2,0) + APPROXIMATE_MEAN
     cv2.imshow("window",im.astype('uint8'))
