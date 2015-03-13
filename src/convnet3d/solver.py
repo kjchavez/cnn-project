@@ -14,6 +14,10 @@ import cPickle
 from src.convnet3d.regularization import *
 from collections import OrderedDict
 
+theano.config.profile = True
+theano.config.profile_memory = True
+
+
 class Solver:
     def __init__(self,conv_net,reg_params,opt_params):
         self.conv_net = conv_net
@@ -143,7 +147,8 @@ class Solver:
                 updates = updates,
                 givens = {
                     conv_net.X: train_X,
-                    conv_net.y: train_y })
+                    conv_net.y: train_y },
+                profile=True)
                     
         # Print the computation graph to a file for examination
 #        theano.printing.pydotprint(self.train_model, outfile="train_file.png",
@@ -354,6 +359,8 @@ def test():
     solver = Solver(net,reg_params,opt_params)
     solver.train(6,snapshot_params,"results/test",validate_rate=2,loss_rate=1,
                  optflow_weight=0.5)
+
+    print solver.train_model.profile.summary()
     
 if __name__ == "__main__":
     from src.convnet3d.cnn3d import get_test_net

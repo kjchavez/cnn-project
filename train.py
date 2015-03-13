@@ -144,6 +144,7 @@ def train(net_file,trial_id,resume=None,seed=1234,dropout=[0.5],snapshot_rate=50
                                          validate_rate=validate_rate,
                                          loss_rate=loss_rate,
                                          optflow_weight=optflow_weight)
+    solver.train_model.profile.summary()
     return best_val_accuracy, best_val_iter
     
 
