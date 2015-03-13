@@ -233,8 +233,10 @@ class Solver:
         history["optflow-normgrad"] = []
         history["filter-norm"] = []
         history["data-normgrad"] = []
+        history["iteration-time"] = []
     
         for iteration in xrange(first_iteration,first_iteration+n_iter):
+            tic = time.time()
             epoch_ended = self.conv_net.train_data.load_batch()
 
             # Compute extra regularization step: Note this is under-developed.
@@ -317,6 +319,9 @@ class Solver:
                 with open(filename,'wb') as fp:
                     for param in self.conv_net.parameters:
                         cPickle.dump(param.get_value(borrow=True),fp,-1)
+                        
+            toc = time.time()
+            history["iteration-time"].append(toc - tic)
             
         end_time = time.clock()
         print(('Optimization complete. Best validation score of %f %% ') %
