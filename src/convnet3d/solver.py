@@ -243,6 +243,7 @@ class Solver:
             # Ideally, it should be built into the Theano framework. Note, this
             # temporary implementation requires that you use momentum updates
             if optflow_weight > 0:
+                train_start_time = time.time()
                 W = self.conv_net.parameters[0] # Apply to first layer
                 reg_loss, reg_grad, _ = optflow_regularizer_fast(
                                             W.get_value(borrow=True),
@@ -257,6 +258,8 @@ class Solver:
                 new_W = W.get_value(borrow=True) - \
                         self.learning_rate.get_value(borrow=True)*optflow_weight*reg_grad
                 W.set_value(new_W.astype(theano.config.floatX))
+                train_end_time = time.time()
+                print "Actual compute time =", train_end_time - train_start_time
                             #optflow_momentum.astype(theano.config.floatX))
                 history["optflow-cost"].append(optflow_weight*reg_loss)
                 history["optflow-normgrad"].append(optflow_weight*np.linalg.norm(reg_grad))
@@ -264,7 +267,10 @@ class Solver:
                 #history["data-normgrad"].append() # TODO: Return norm from somewhere
             else:
                 # Train this batch
+                train_start_time = time.time()
                 minibatch_avg_cost, train_acc = self.train_model()
+                train_end_time = time.time()
+                print "Actual compute time =", train_end_time - train_start_time
                         
             history["loss"].append(minibatch_avg_cost)
             history["train-accuracy"].append(train_acc)
