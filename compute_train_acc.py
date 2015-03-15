@@ -35,7 +35,7 @@ with open(os.path.join(args.directory,"architecture.txt")) as fp:
 trial_id = int(args.directory.split('-')[1]) 
 print trial_id
 snaps = os.listdir(os.path.join(args.directory,'snapshots'))
-snapshots = sorted([int(x.rsplit('-',1)[1]) for x in snaps])
+snapshots = [sorted([int(x.rsplit('-',1)[1]) for x in snaps])[-1]]
 
 # Move validation history to temporary file
 shutil.move(os.path.join(args.directory,'validation-history.txt'),
