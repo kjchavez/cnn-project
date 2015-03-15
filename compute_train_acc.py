@@ -32,7 +32,7 @@ with open(os.path.join(args.directory,"architecture.txt")) as fp:
             
     test_arch.close()
 
-trial_id = int(args.directory.split('-')[1]) 
+trial_id = int(args.directory.rsplit('-',1)[1]) 
 print trial_id
 snaps = os.listdir(os.path.join(args.directory,'snapshots'))
 snapshots = [sorted([int(x.rsplit('-',1)[1]) for x in snaps])[-1]]
