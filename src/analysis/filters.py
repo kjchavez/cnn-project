@@ -9,6 +9,8 @@ Created on Mon Mar  2 07:33:06 2015
 import os
 import glob
 import cPickle
+import shutil
+import subprocess
 import numpy as np
 import scipy.ndimage
 import matplotlib.pyplot as plt
@@ -106,9 +108,9 @@ def visualize_filters(directory,savepath="figs",mean=0.3,std=0.1):
             
         fig.suptitle("Filter #%d Weights" % i)
         plt.savefig(os.path.join(savepath,'filter-%03d.png' % i))
-        fig.close()
+        plt.close(fig)
             
-def apply_filters(directory,videos,iteration="best",level=0,num_loops=5):
+def apply_filters(directory,videos,output_filename,iteration="best",level=0,num_loops=5):
     if level > 0:
         raise NotImplementedError("Sorry, not implemented yet for higher level"
                                   " filters yet.")
@@ -140,7 +142,7 @@ def apply_filters(directory,videos,iteration="best",level=0,num_loops=5):
     activations = []
     for idx in xrange(filters.shape[0]):
         print "-"*20
-        print "Filter #%d" % idx
+        print "Filter #%d activation" % idx
         print "-"*20
         W = filters[idx]
         # We do convolution with scipy here, but its exactly the same as during
@@ -163,7 +165,8 @@ def apply_filters(directory,videos,iteration="best",level=0,num_loops=5):
         activation = np.minimum(activation,255)
         activations.append(activation.astype(np.uint8))
 
-    
+    #plt.show()  
+
     # Play all activation videos on big screen
     TT,HH,WW = clip.shape[0:3]
     N = int(np.ceil(np.sqrt(filters.shape[0])))
@@ -173,15 +176,42 @@ def apply_filters(directory,videos,iteration="best",level=0,num_loops=5):
             if (i*N + j) < len(activations):
                 frames[:,i*(HH+5):i*(HH+5)+HH,j*(HH+5):j*(WW+5)+WW] = \
                     activations[i*N + j]
-    plt.show()    
-    play_clip(frames,loops=num_loops)
+      
+    folder = "video"
+    shutil.rmtree(folder)
+    os.makedirs(folder)
+    for i in range(frames.shape[0]):
+        filename = os.path.join(folder,'frame-%04d.png' % i)
+        cv2.imwrite(filename,frames[i])
+        
+    subprocess.call(['avconv', '-framerate', '25', '-f', 'image2',
+                     '-i', os.path.join(folder,'frame-%04d.png'), 
+                     '-c:v', 'h264', '-crf', '1', output_filename])
+    #play_clip(frames,loops=num_loops)
             
 def test():
     plt.close('all')
-    visualize_filters("../tmp/project-data/baby-regnet-0002")
-    plot_val_accuracy("../tmp/project-data/baby-regnet-0002")
-    apply_filters("../tmp/project-data/baby-regnet-0002",
-                      ["data/UCF-101/Archery/v_Archery_g09_c07.avi"])
+    #visualize_filters("../important-data/baby-regnet-0013")
+    #plot_val_accuracy("../tmp/project-data/baby-regnet-0002")
+    samples = [
+        "ApplyLipstick/v_ApplyLipstick_g08_c01",
+        "BalanceBeam/v_BalanceBeam_g17_c01",
+        "BasketballDunk/v_BasketballDunk_g18_c05",
+        "BabyCrawling/v_BabyCrawling_g16_c05",
+        "Archery/v_Archery_g11_c04",
+        "BaseballPitch/v_BaseballPitch_g22_c04",
+        "BenchPress/v_BenchPress_g19_c01",
+        "ApplyEyeMakeup/v_ApplyEyeMakeup_g12_c02",
+        "BandMarching/v_BandMarching_g14_c04",
+        "Basketball/v_Basketball_g10_c04"]
+    
+    if not os.path.isdir("video-samples"):
+        os.makedirs("video-samples")
+    
+    for s in samples:
+        apply_filters("../important-data/baby-regnet-0013",
+                      ["data/UCF-101/%s.avi" % s],
+                      "video-samples/%s.mp4" % s.split('/')[1])
     
 
 if __name__ == "__main__":
