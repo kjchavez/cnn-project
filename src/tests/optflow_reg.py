@@ -5,7 +5,7 @@ Created on Sun Feb 22 18:39:02 2015
 
 @author: kevin
 """
-from src.convnet3d.convnet3d import optical_flow_regularizer
+from src.convnet3d.regularization import optflow_regularizer_fast
 import theano
 import theano.tensor as T
 import numpy as np
@@ -51,29 +51,37 @@ def display(filt, Vx, Vy):
     TT = filt.shape[1]
     HH, WW = filt.shape[2:]
     frames = [filt[:,i].transpose(1,2,0) + APPROXIMATE_MEAN for i in xrange(filt.shape[1])]
+    plt.figure()
     for t, frame in zip(range(TT),frames):
         frame = clip(frame,0,255)
         if Vx is not None and Vy is not None:
             plt.subplot(2,TT,TT+t+1)
             I,J = np.meshgrid(range(HH),range(WW),indexing='ij')
+            
+            Q = plt.quiver(Vx[t],Vy[t])
+            qk = plt.quiverkey(Q, 0.5, 0.92, 0, r'', labelpos='W',
+                           fontproperties={'weight': 'bold'})
+#            l,r,b,t = plt.axis()
+#            dx, dy = r-l, t-b
+#            plt.axis([l-0.05*dx, r+0.05*dx, b-0.05*dy, t+0.05*dy])
     
             #print np.mean(Vx), np.mean(Vy)
             #testy = np.zeros_like(Vy[t])
             #testy[0,:] = 1 
-            plt.streamplot(I[:,0], -J[0], Vx[t], -Vy[t])            
-            plt.axis('image')
-            plt.tick_params(\
-                axis='x',          # changes apply to the x-axis
-                which='both',      # both major and minor ticks are affected
-                bottom='off',      # ticks along the bottom edge are off
-                top='off',         # ticks along the top edge are off
-                labelbottom='off')
-            plt.tick_params(\
-                axis='y',          # changes apply to the x-axis
-                which='both',      # both major and minor ticks are affected
-                left='off',      # ticks along the bottom edge are off
-                right='off',         # ticks along the top edge are off
-                labelleft='off')
+            #plt.streamplot(I[:,0], -J[0], Vx[t], -Vy[t])            
+#            plt.axis('image')
+#            plt.tick_params(\
+#                axis='x',          # changes apply to the x-axis
+#                which='both',      # both major and minor ticks are affected
+#                bottom='off',      # ticks along the bottom edge are off
+#                top='off',         # ticks along the top edge are off
+#                labelbottom='off')
+#            plt.tick_params(\
+#                axis='y',          # changes apply to the x-axis
+#                which='both',      # both major and minor ticks are affected
+#                left='off',      # ticks along the bottom edge are off
+#                right='off',         # ticks along the top edge are off
+#                labelleft='off')
         plt.subplot(2,TT,t+1)
         plt.imshow(frame.astype('uint8'),interpolation='none')
     
@@ -165,35 +173,16 @@ def moving_edge_test():
         moving_edge[:,0,t,t:t+1,:] = 100
         
         
-    moving_edge = np.repeat(moving_edge,3,axis=1)
+    moving_edge = np.repeat(moving_edge,C,axis=1)
     noise = 5.0*np.random.randn(*moving_edge.shape)
     moving_edge += noise
-    original = np.copy(moving_edge)
-    #display(original[0],None,None)
-
-    kernel = theano.shared(
-                moving_edge.astype(theano.config.floatX),
-                borrow=True)
+    kernel = moving_edge
     
-    #play_clip(moving_edge[0])
-    loss, updates, grad, Vx, Vy = \
-        optical_flow_regularizer(kernel,(N,C,TT,H,W), gamma=3.)
-        
-    lr = 0.5
-    print "Compiling train function..."
-    train = theano.function(
-                inputs=[],
-                outputs=[loss,grad, Vx, Vy],
-                updates=updates+[(kernel, kernel - lr*grad)])
-                
-    print "Done."
-
-    for k in xrange(20):
-        l, g, vx, vy = train()
-        print "loss %0.2f, ||grad|| = %0.3f, ||W|| = %0.3f" % \
-                (l, np.linalg.norm(g),np.linalg.norm(kernel.get_value()))
-        
-    display(kernel.get_value()[0],vx[0], vy[0])
+    loss, grad, (Vx, Vy) = optflow_regularizer_fast(kernel)
+    print Vx.shape, Vy.shape
+    plt.close('all')
+    display(kernel[0],Vx[0], Vy[0])
+    
     #play_clip(original[0] + 127,gray=True)    
     #play_clip(kernel.get_value()[0] + 127,gray=True)
 
