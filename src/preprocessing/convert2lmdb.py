@@ -23,8 +23,7 @@ def read_clip(capture, video_filename, num_frames,
     success = capture.open(video_filename)
     
     if not success:
-        print "Couldn't open video"
-        print "Crashed at index %d." % index
+        print "Couldn't open video %s." % video_filename
         return None
         
     if width < 0:
