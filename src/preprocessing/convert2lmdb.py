@@ -126,6 +126,13 @@ def convert_list(list_file,database_name,root_directory,
                 clips = read_clip(capture,full_filename,num_frames,height=height,
                                   width=width,start_frame=start_frame,
                                   subsample=subsample,num_cuts=num_cuts)
+
+                # If for some reason we fail to read from this file, skip it
+                # and proceed.
+                if clips is None:
+                    print "Skipping file: %s..." % full_filename
+                    continue
+
                 datums = [create_datum(clip,label) for clip in clips]
                 data += datums
 
